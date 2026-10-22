@@ -1,0 +1,63 @@
+# Exécutable Windows autonome (sans Python à installer), fabriqué par PyInstaller.
+# Lancé à la main (onglet Actions → « Exécutable Windows » → Run workflow) ou par un tag v* (publie une release).
+name: Exécutable Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Tests
+        run: python -m unittest discover tests -v
+
+      - name: Fabrication
+        run: |
+          python -m pip install pyinstaller==6.11.1
+          pyinstaller --noconfirm --onefile --console --name MonitoringSat --paths . --add-data "web;web" --add-data "config.example.toml;." packaging/monitoring_sat.py
+
+      - name: Essai de l'exécutable
+        shell: pwsh
+        run: |
+          $dir = New-Item -ItemType Directory -Force essai
+          Copy-Item dist\MonitoringSat.exe $dir
+          $p = Start-Process -FilePath "$dir\MonitoringSat.exe" -ArgumentList "--no-open" -WorkingDirectory $dir -PassThru
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            try { Invoke-WebRequest http://127.0.0.1:8080/api/status -UseBasicParsing -TimeoutSec 2 | Out-Null; $ok = $true; break }
+            catch { Start-Sleep -Seconds 1 }
+          }
+          if ($ok) { Invoke-WebRequest http://127.0.0.1:8080/ -UseBasicParsing | Out-Null }
+          Stop-Process -Id $p.Id -Force
+          if (-not $ok) { Write-Error "le service ne répond pas"; exit 1 }
+          if (-not (Test-Path "$dir\config.toml")) { Write-Error "config.toml non créé"; exit 1 }
+
+      - name: Archive
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force MonitoringSat | Out-Null
+          Copy-Item dist\MonitoringSat.exe, packaging\LISEZMOI-Windows.txt MonitoringSat
+          Compress-Archive -Path MonitoringSat -DestinationPath MonitoringSat-Windows.zip
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: MonitoringSat-Windows
+          path: MonitoringSat-Windows.zip
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MonitoringSat-Windows.zip

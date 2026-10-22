@@ -1,0 +1,19 @@
+<response command='status' uuid='tNeeu1wu' status='ok'>
+   <message>status message</message>
+   <system>
+      <id>1000-00001</id>
+      <systemName>IRD 1</systemName>
+      <vendorName>Ateme</vendorName>
+      <modelName>DR5000</modelName>
+      <systemNotes></systemNotes>
+      <locked>false</locked>
+      <current>2.9.3.0 (build 2.9.3.0)</current>
+      <fpgaTemp>48</fpgaTemp>
+      <cpuTemp>42</cpuTemp>
+      <overheat>false</overheat>
+      <fanFailure>false</fanFailure>
+      <powerFailure>false</powerFailure>
+      <time>1792676216</time>
+      <boardRevision>1.2.0.1</boardRevision>
+   </system>
+</response>

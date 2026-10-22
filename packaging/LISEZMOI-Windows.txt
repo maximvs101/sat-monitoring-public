@@ -1,0 +1,30 @@
+Monitoring satellite FSH4 + IRD — Windows
+=========================================
+
+Installation
+------------
+1. Extraire le dossier de l'archive dans un emplacement fixe, par exemple C:\MonitoringSat
+   (pas dans Téléchargements : config.toml, la base et les journaux sont créés à côté de l'exécutable).
+2. Double-cliquer sur MonitoringSat.exe.
+   Au premier lancement, Windows peut afficher « Windows a protégé votre ordinateur » (l'exécutable n'est pas
+   signé) : cliquer sur « Informations complémentaires », puis « Exécuter quand même ».
+3. La page s'ouvre dans le navigateur : http://localhost:8080
+4. Bouton « Appareils… » : renseigner l'adresse du FSH4, ajouter les IRD (ou « Rechercher sur le réseau »).
+
+Le PC doit être sur le même réseau que le FSH4 et les IRD.
+
+Utilisation
+-----------
+- Laisser la fenêtre noire ouverte : c'est le service. La fermer arrête la surveillance.
+- Le PC ne se met pas en veille tant que le service tourne (l'écran peut s'éteindre).
+- Seuils d'alerte : bouton « Seuils… » de la page.
+
+Fichiers créés à côté de MonitoringSat.exe
+------------------------------------------
+- config.toml : appareils, porteuses, seuils (modifiable aussi depuis la page)
+- data\monitoring.db : mesures et événements (purgés après 30 jours)
+- logs\monitoring.log : journal du service
+
+Mise à jour : remplacer MonitoringSat.exe par la nouvelle version ; config.toml et data\ sont conservés.
+
+L'outil ne fait que lire les appareils : il ne change aucun réglage du FSH4 ni des IRD.

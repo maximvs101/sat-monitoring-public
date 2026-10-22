@@ -1,0 +1,43 @@
+# Configuration du monitoring satellite FSH4 + IRD.
+# Toute clé absente prend sa valeur par défaut.
+# Modèle : copié en config.toml au premier lancement. Les IRD s'ajoutent depuis la page (Appareils…).
+
+[fsh]
+host = ""                 # analyseur R&S FSH4 : à renseigner depuis la page (Appareils…)
+port = 5555               # SCPI texte
+rate_hz = 4.0             # lectures du marqueur par seconde
+timeout_s = 2.0           # délai maximal par requête
+min_idle_s = 0.2          # silence entre deux cycles : sans lui, le FSH4 ne rafraîchit plus sa mesure
+
+[ird]                     # cadence et délai, communs à tous les IRD
+rate_hz = 1.0
+timeout_s = 3.0
+
+[detect]
+margin_min_db = 0.0        # marge minimale (« Marge basse ») ; 0 = désactivée, réglable depuis la page (Seuils…)
+ber_threshold = 1e-6       # BER au-delà duquel on ouvre « ber_high »
+ber_clear_s = 5.0          # durée sous le seuil avant de fermer
+margin_drop_db = 2.0       # chute de marge sous la médiane
+margin_recover_db = 1.0    # retour à moins de X dB de la référence
+marker_drop_db = 3.0       # chute du niveau marqueur sous la médiane
+marker_recover_db = 1.0
+median_window_s = 60.0     # fenêtre de la médiane glissante
+min_history_s = 10.0       # historique minimal avant de détecter une chute
+drop_confirm_s = 3.0       # une chute se juge sur la médiane des dernières X secondes (ignore les points isolés)
+noise_markers = []             # marqueurs FSH4 posés sur le plancher de bruit, par ex. [4, 5]
+noise_rise_db = 3.0        # remontée du bruit (moyenne de ces marqueurs) au-dessus de la médiane
+noise_recover_db = 1.0
+down_after_failures = 3    # échecs consécutifs avant « appareil injoignable »
+retry_s = 5.0              # intervalle des nouveaux essais
+
+[server]
+host = "127.0.0.1"
+port = 8080
+live_window_min = 10       # fenêtre du mode Direct
+event_padding_s = 30       # marge autour d'un événement cliqué
+max_points = 5000          # au-delà, les séries sont agrégées
+
+[paths]
+db = "data/monitoring.db"
+log_dir = "logs"
+retention_days = 30        # durée de conservation des mesures en jours ; 0 = tout garder

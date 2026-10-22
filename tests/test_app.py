@@ -1,0 +1,367 @@
+import tempfile
+import unittest
+from dataclasses import replace
+from pathlib import Path
+
+from monitoring.app import App
+from monitoring.config import CarrierEntry, IrdEntry, PathsConfig, load_config, save_irds
+from monitoring.fsh import FshReading, FshSettings, MarkerSample
+from monitoring.ird import IrdError, IrdHealth, IrdLogMessage, IrdReading, IrdSample
+
+V = "vertical"
+
+
+def sample(rf_khz=12_583_023, margin=6.3, locked=True, ber=0.0, pol=V):
+    return IrdSample(locked=locked, ts_locked=True, cn_db=margin + 5, margin_db=margin, ber=ber, ber_raw="0",
+                     power_dbm=-40.0, if_khz=1_983_023, symbol_rate=7_200_000, modcod="dvbs2 8psk 3/4",
+                     bitrate_kbps=20000, rf_khz=rf_khz, polarization=pol, roll_off=0.25)
+
+
+def fsh(markers, span=50e6):
+    return FshReading({n: MarkerSample(f, l) for n, (f, l) in markers.items()},
+                      FshSettings(span, 300e3, tuple((n, f) for n, (f, _) in markers.items())))
+
+
+class FakeIrds:
+    """Faux parc d'IRD : adresse → (numéro de série, nom), et mesures programmables par série."""
+
+    def __init__(self):
+        self.devices = {"10.0.0.1": ("S1", "IRD 1"), "10.0.0.2": ("S2", "IRD 2"), "10.0.0.3": ("S3", "IRD 3")}
+        self.samples = {"S1": sample(), "S2": sample(), "S3": sample(rf_khz=11_220_806, pol=None)}
+        self.health = {}  # série → IrdHealth renvoyé avec la prochaine lecture
+        self.logs = {}    # série → messages du journal renvoyés avec la prochaine lecture
+
+    def factory(self, entry, cfg):
+        def identify():
+            if entry.host not in self.devices:
+                raise IrdError("IRD injoignable")
+            return self.devices[entry.host]
+
+        def read():
+            serial, _ = identify()
+            if entry.serial and serial != entry.serial:
+                raise IrdError(f"autre appareil à cette adresse (n° {serial})")
+            return IrdReading(self.samples[serial], self.health.get(serial), self.logs.get(serial))
+
+        return read, identify
+
+
+class AppTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)  # en dernier : après l'arrêt de l'application
+        root = Path(self.dir.name)
+        self.cfg_path = root / "config.toml"
+        self.cfg_path.write_text("[fsh]\nhost = \"10.0.0.9\" # FSH4\n", encoding="utf-8")
+        self.irds = FakeIrds()
+        self.reading = fsh({1: (11_220.8e6, -50.0), 4: (11_200e6, -67.0)})
+        self.closed = 0
+
+    def make(self, entries=(), carriers=(), fsh_pol=V, noise_markers=()):
+        save_irds(self.cfg_path, entries)
+        cfg = load_config(self.cfg_path)
+        cfg = replace(cfg, fsh=replace(cfg.fsh, polarization=fsh_pol), carriers=tuple(carriers),
+                      detect=replace(cfg.detect, noise_markers=noise_markers),
+                      paths=PathsConfig(db=str(Path(self.dir.name) / "m.db"), log_dir=self.dir.name))
+        app = App(cfg, fsh_read=lambda: self.reading, fsh_close=self.count_close, ird_factory=self.irds.factory,
+                  config_path=self.cfg_path, web_dir=Path(self.dir.name))
+        self.addCleanup(app.stop)
+        return app
+
+    def count_close(self):
+        self.closed += 1
+
+    def step_irds(self, app, n=1):
+        for _ in range(n):
+            for loop in app.ird_loops.values():
+                loop.step()
+
+    def test_two_irds_one_carrier_in_status(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
+        self.step_irds(app)
+        st = app.status()
+        self.assertEqual(sorted(st["irds"]), ["S1", "S2"])
+        self.assertEqual(st["irds"]["S1"]["name"], "IRD 1")
+        [carrier] = st["carriers"]
+        self.assertEqual((carrier["key"], carrier["irds"]), ("125830-V", ["S1", "S2"]))
+
+    def test_add_ird_identifies_and_saves(self):
+        app = self.make()
+        entry = app.add_ird("10.0.0.2")
+        self.assertEqual(entry, IrdEntry("S2", "IRD 2", "10.0.0.2"))
+        self.assertEqual(load_config(self.cfg_path).irds, (entry,))
+        self.assertIn("S2", app.ird_loops)
+        self.assertEqual(app.store.ird_names()["S2"], "IRD 2")
+        self.assertIn("# FSH4", self.cfg_path.read_text(encoding="utf-8"))
+
+    def test_add_same_serial_twice_raises(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        with self.assertRaises(ValueError):
+            app.add_ird("10.0.0.1")
+
+    def test_add_unreachable_raises(self):
+        app = self.make()
+        with self.assertRaises(IrdError):
+            app.add_ird("10.0.0.99")
+        self.assertEqual(load_config(self.cfg_path).irds, ())
+
+    def test_update_ird_name_and_host(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        app.update_ird("S1", name="Récepteur A", host=None)
+        self.assertEqual(load_config(self.cfg_path).irds[0].name, "Récepteur A")
+        self.assertEqual(app.store.ird_names()["S1"], "Récepteur A")
+        with self.assertRaises(KeyError):
+            app.update_ird("S9", name="x", host=None)
+
+    def test_remove_ird_closes_its_alerts(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.samples["S1"] = sample(locked=False)
+        self.step_irds(app)
+        self.assertEqual([e["kind"] for e in app.store.events(0, 10**13) if e["ts_end"] is None], ["lock_lost"])
+        app.remove_ird("S1")
+        [ev] = app.store.events(0, 10**13)
+        self.assertTrue(ev["detail"].endswith("— IRD retiré"))
+        self.assertIsNotNone(ev["ts_end"])
+        self.assertNotIn("S1", app.ird_loops)
+        self.assertEqual(load_config(self.cfg_path).irds, ())
+
+    def test_unidentified_ird_from_legacy_config_is_identified_at_start(self):
+        app = self.make((IrdEntry("", "IRD", "10.0.0.1"),))
+        self.assertEqual(app.ird_loops, {})
+        app.identify_pending()
+        self.assertEqual(list(app.ird_loops), ["S1"])
+        self.assertEqual(load_config(self.cfg_path).irds, (IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+
+    def test_alone_alert_end_to_end(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
+        self.step_irds(app)
+        self.irds.samples["S1"] = sample(locked=False)
+        import time
+        for _ in range(4):
+            self.step_irds(app)
+            time.sleep(1.05)
+        kinds = [e["kind"] for e in app.store.events(0, 10**13) if e["ts_end"] is None]
+        self.assertIn("ird_alone", kinds)
+
+    def test_reading_with_health_and_logs_end_to_end(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.health["S1"] = IrdHealth(48.0, 42.0, False, False, False)
+        self.irds.logs["S1"] = [IrdLogMessage(335, "Program is scrambled", "information", False)]
+        self.step_irds(app)
+        self.assertEqual(app.store.events(0, 10**13), [])  # journal déjà présent : ignoré
+        self.irds.health["S1"] = IrdHealth(90.0, 80.0, True, False, False)
+        self.irds.logs["S1"] = self.irds.logs["S1"] + [IrdLogMessage(336, "No input activity", "warning", False)]
+        self.step_irds(app)
+        events = {e["kind"]: e for e in app.store.events(0, 10**13)}
+        self.assertEqual(events["hw_fault"]["detail"], "IRD 1 : surchauffe")
+        self.assertEqual(events["ird_log"]["detail"], "IRD 1 : No input activity")
+        self.assertEqual(events["ird_log"]["source"], "ird:S1")
+
+    def test_status_has_decode_and_health(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.samples["S1"] = replace(sample(), video_active=True, video_format="hd_1920x1080i_50",
+                                          audio_configured=5, audio_active=5, program_number=1, service_name="MAIN")
+        self.irds.health["S1"] = IrdHealth(48.0, 42.0, False, False, False)
+        self.step_irds(app)
+        latest = app.status()["irds"]["S1"]["latest"]
+        self.assertEqual((latest["video_active"], latest["video_format"], latest["audio_active"], latest["service_name"],
+                          latest["state"]), (True, "hd_1920x1080i_50", 5, "MAIN", 0))
+        self.assertEqual(latest["health"]["fpga_temp"], 48.0)
+
+    def test_reading_after_removal_ignored(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        app.remove_ird("S1")
+        app._on_ird("S1", 10**12, IrdReading(sample(locked=False)))  # lecture arrivée après le retrait
+        self.assertEqual(app.store.events(0, 10**13), [])
+        self.assertNotIn("S1", app.detector.irds)
+
+    def test_status_config_has_margin_threshold(self):
+        app = self.make()
+        cfg = app.status()["config"]
+        self.assertEqual((cfg["margin_drop_db"], cfg["median_window_s"], cfg["drop_confirm_s"]), (2.0, 60.0, 3.0))
+
+    def test_details_in_status_and_live_not_stored(self):
+        from monitoring.ird import AudioVoice, IrdDetails
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        details = IrdDetails(video_codec="h264", audio=(AudioVoice(0, 4112, "mpa", 2, 48000, 384000, True),))
+        self.irds.samples["S1"] = replace(sample(), details=details)
+        q = app.bus.subscribe()
+        self.step_irds(app)
+        msg = next(m for m in iter(q.get_nowait, None) if m["type"] == "ird")
+        self.assertEqual(msg["details"]["audio"][0]["pid"], 4112)
+        latest = app.status()["irds"]["S1"]["latest"]
+        self.assertEqual(latest["details"]["video_codec"], "h264")
+        self.assertNotIn("details", app.store.latest()["irds"]["S1"])
+
+    def test_removal_during_reading_leaves_no_orphan(self):
+        # Retrait de l'IRD pendant le traitement d'une lecture (entre le contrôle et la détection).
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        original, fired = app.carriers, []
+
+        def carriers_then_remove():
+            if not fired:
+                fired.append(1)
+                app.remove_ird("S1")
+            return original()
+
+        app.carriers = carriers_then_remove
+        app._on_ird("S1", 10**12, IrdReading(sample(locked=False)))
+        self.assertNotIn("S1", app.detector.irds)
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["ts_end"] is None], [])
+        self.assertNotIn("S1", app.tunings)
+
+    def test_status_fsh_span_and_rbw(self):
+        app = self.make()
+        self.assertEqual((app.status()["fsh"]["span_hz"], app.status()["fsh"]["rbw_hz"]), (None, None))
+        app.fsh_loop.step()
+        fsh_status = app.status()["fsh"]
+        self.assertEqual((fsh_status["span_hz"], fsh_status["rbw_hz"]), (50e6, 300e3))
+
+    def test_carriers_message_published_when_grouping_changes(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        q = app.bus.subscribe()
+        self.step_irds(app)
+        msgs = []
+        while not q.empty():
+            msgs.append(q.get())
+        self.assertEqual([m["carriers"][0]["key"] for m in msgs if m["type"] == "carriers"], ["125830-V"])
+        self.step_irds(app)
+        self.assertFalse(any(q.get()["type"] == "carriers" for _ in range(q.qsize())))
+
+    def test_marker_drop_uses_center_marker_of_carrier(self):
+        entries = (IrdEntry("S3", "IRD 3", "10.0.0.3"),)
+        app = self.make(entries)
+        self.step_irds(app)
+        t = 0
+        for level in [-50.0] * 60 + [-56.0] * 3:
+            self.reading = fsh({1: (11_220.8e6, level), 2: (11_213e6, -50.0), 4: (11_200e6, -67.0)})
+            t += 1000
+            app._on_marker(t, app.fsh_loop.read())
+        [ev] = [e for e in app.store.events(0, 10**13) if e["kind"] == "marker_drop"]
+        self.assertEqual(ev["source"], "porteuse:112208-?")
+
+    def test_if_markers_warning_in_status(self):
+        app = self.make((IrdEntry("S3", "IRD 3", "10.0.0.3"),))
+        self.reading = fsh({1: (1_470.8e6, -50.0)})
+        self.step_irds(app)
+        app.fsh_loop.step()
+        self.assertTrue(app.status()["marker_map"]["if_warning"])
+
+    def test_noise_from_markers_outside_carriers(self):
+        app = self.make((IrdEntry("S3", "IRD 3", "10.0.0.3"),))
+        self.step_irds(app)
+        t = 0
+        for noise in [-67.0] * 60 + [-62.0] * 3:
+            t += 1000
+            app._on_marker(t, fsh({1: (11_220.8e6, -50.0), 4: (11_200e6, noise), 5: (11_242e6, noise)}))
+        self.assertIn("noise_rise", [e["kind"] for e in app.store.events(0, 10**13)])
+
+    def test_set_fsh_saves_polarization(self):
+        app = self.make()
+        app.set_fsh("10.0.0.8", 5025, "horizontal")
+        fsh_cfg = load_config(self.cfg_path).fsh
+        self.assertEqual((fsh_cfg.host, fsh_cfg.port, fsh_cfg.polarization), ("10.0.0.8", 5025, "horizontal"))
+        self.assertEqual(app.store.events(0, 10**13)[0]["kind"], "devices_changed")
+
+    def test_carriers_rename_add_remove(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.step_irds(app)
+        app.set_carrier_name("125830-V", "Client A")
+        self.assertEqual(app.carriers()[0].name, "Client A")
+        self.assertEqual(load_config(self.cfg_path).carriers[0].name, "Client A")
+        app.add_carrier(CarrierEntry("Sans IRD", 11685.0, "horizontal", 27.5, True))
+        keys = [c.key for c in app.carriers()]
+        self.assertEqual(keys, ["116850-H", "125830-V"])
+        with self.assertRaises(ValueError):
+            app.remove_carrier("125830-V")  # automatique : on ne la supprime pas
+        app.remove_carrier("116850-H")
+        self.assertEqual([c.key for c in app.carriers()], ["125830-V"])
+
+    def test_concurrent_add_remove_while_reading(self):
+        # Ajout / retrait d'un IRD pendant que la collecte et la page lisent l'état de l'application.
+        import threading
+        import time as _time
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S3", "IRD 3", "10.0.0.3")))
+        extra = [f"10.0.1.{i}" for i in range(30)]
+        for i, host in enumerate(extra):
+            self.irds.devices[host] = (f"X{i}", f"IRD X{i}")
+            self.irds.samples[f"X{i}"] = sample(rf_khz=12_583_023 + i)
+        self.step_irds(app)
+        errors, stop = [], threading.Event()
+
+        def churn():
+            while not stop.is_set():
+                try:
+                    for host in extra:
+                        app.add_ird(host)
+                    for i in range(len(extra)):
+                        app._on_ird(f"X{i}", 10**12, IrdReading(sample()))
+                    for i in range(len(extra)):
+                        app.remove_ird(f"X{i}")
+                except Exception as e:  # noqa: BLE001 — tout est une erreur ici
+                    errors.append(repr(e))
+
+        def read():
+            t = 10**12
+            while not stop.is_set():
+                try:
+                    t += 1
+                    app._on_ird("S1", t, IrdReading(sample()))
+                    app.status()
+                    app._on_marker(t, self.reading)
+                except Exception as e:  # noqa: BLE001
+                    errors.append(repr(e))
+
+        import sys
+        saved = sys.getswitchinterval()
+        sys.setswitchinterval(1e-6)  # changements de fil très fréquents : rend le conflit observable
+        self.addCleanup(sys.setswitchinterval, saved)
+        threads = [threading.Thread(target=churn), threading.Thread(target=read), threading.Thread(target=read)]
+        for th in threads:
+            th.start()
+        _time.sleep(2)
+        stop.set()
+        for th in threads:
+            th.join(10)
+        self.assertEqual(errors[:3], [])
+
+    def test_polarization_override_groups_and_is_stored(self):
+        self.irds.samples["S1"] = sample(pol=None)
+        self.irds.samples["S2"] = sample(pol=None)
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
+        self.step_irds(app)
+        [c] = app.status()["carriers"]
+        self.assertEqual((c["key"], c["unknown_polarization"]), ("125830-?", ["S1", "S2"]))
+        app.update_ird("S1", name=None, host=None, polarization="horizontal")
+        app.update_ird("S2", name=None, host=None, polarization="vertical")
+        self.step_irds(app)
+        keys = sorted(c["key"] for c in app.status()["carriers"])
+        self.assertEqual(keys, ["125830-H", "125830-V"])  # transpondeurs V et H de même fréquence : séparés
+        self.assertEqual(app.store.latest()["irds"]["S1"]["polarization"], "horizontal")
+        self.assertEqual(load_config(self.cfg_path).irds[0].polarization, "horizontal")
+        app.update_ird("S1", name=None, host=None, polarization=None)
+        self.assertIsNone(load_config(self.cfg_path).irds[0].polarization)
+
+    def test_pause_closes_fsh(self):
+        app = self.make()
+        app.fsh_loop.pause()
+        app.fsh_loop.step()
+        self.assertEqual(self.closed, 1)
+
+    def test_start_closes_stale_events(self):
+        app = self.make()
+        app.store.add_ird(1000, "S1", sample())
+        app.store.open_event(900, "lock_lost", "critical", "x", "ird:S1")
+        app.start()
+        self.assertEqual(app.store.events(0, 10**13)[0]["ts_end"], 1000)
+
+    def test_start_purges_old_data(self):
+        app = self.make()
+        app.store.add_ird(1000, "S1", sample())
+        app.cfg = replace(app.cfg, paths=replace(app.cfg.paths, retention_days=1))
+        app.start()
+        self.assertEqual(app.store._all("SELECT COUNT(*) FROM ird_sat")[0][0], 0)
+
+
+if __name__ == "__main__":
+    unittest.main()

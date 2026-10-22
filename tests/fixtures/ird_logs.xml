@@ -1,0 +1,13 @@
+<response command='logs' uuid='tNeeu1wu' status='ok'>
+   <message>here are the logs !</message>
+   <logs>
+      <message id='0'>
+         <nId>335</nId>
+         <ident>21440</ident>
+         <nTimeBegin>1792661046000000</nTimeBegin>
+         <nTimeEnd>-1</nTimeEnd>
+         <cDetails>Program is scrambled</cDetails>
+         <level>information</level>
+      </message>
+   </logs>
+</response>
