@@ -87,7 +87,7 @@ const CarrierPage = (() => {
 
   function rfReason() {
     const st = Store.state.states.fsh;
-    if (live() && st === "down") return "Pas de niveau RF : FSH4 hors ligne.";
+    if (live() && st === "down") return `Pas de niveau RF : aucune mesure du FSH4 (${Store.state.details.fsh || "injoignable"}).`;
     if (live() && st === "paused") return "Pas de niveau RF : FSH4 en pause.";
     return "Pas de niveau RF : aucun marqueur du FSH4 sur cette porteuse (hors du span, ou marqueur non placé).";
   }

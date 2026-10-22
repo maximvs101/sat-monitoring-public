@@ -2,17 +2,18 @@
 
 ## État actuel (22 octobre 2026, soir)
 
-- Branche `main` ; 260 tests Python et 13 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 262 tests Python et 13 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) sur la porteuse « C1 » (12 583,0 V), programme P100/2, marge 6,3 dB, état normal.
   - IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) sur la porteuse « C2 » (12 592,0 V) : joignable mais **lock perdu depuis 18:56 le 22/10** (puissance d'entrée 0 dBm, marge 0), alerte en cours ; côté réception, pas lié au code.
-  - FSH4 (192.168.10.224) injoignable : son alerte « Appareil injoignable » reste en cours, la puissance d'entrée des IRD tient lieu de niveau RF.
+  - FSH4 : l'outil pointe depuis le 22/10 au soir sur un autre FSH4, 192.168.10.99 (n° 100001, firmware V2.50), qui n'a pas l'option FSH-K40 : aucune mesure possible (voir le guide). L'ancien FSH4 (192.168.10.224, V1.20) n'en avait pas besoin. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
 - Windows : versions publiées sur le dépôt public, dernière **v1.0.1** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.1, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
 ## À faire
 
+- FSH4 192.168.10.99 : licence FSH-K40 à obtenir (ou remettre l'ancien FSH4 en V1.20).
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
 - Essayer `MonitoringSat.exe` (release v1.0.1) sur un vrai PC Windows du réseau des appareils. Nouvelle version : pousser un tag `v…`.
 - Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
@@ -36,6 +37,7 @@
 
 ## 22 octobre 2026
 
+- **FSH4 sans FSH-K40** : Max a branché un second FSH4 (192.168.10.99, firmware V2.50). Il répond à `*IDN?`, `*OPT?` (« 0 »), `INST?` (SAN) et aux commandes de fichiers `MMEM`, mais à aucune commande de mesure (-113 « Undefined header ») : option de commande à distance FSH-K40 absente, exigée depuis le firmware V1.30. Port 80 : simple renvoi vers le gestionnaire de licences R&S. L'outil le dit maintenant en clair (après une requête sans réponse, il lit `SYST:ERR?`), et la page n'écrit plus « hors ligne » pour un FSH4 qui répond.
 - **Vérification des données des IRD** (réponses brutes `refresh`, `status`, `logs` des IRD 1 et 3 comparées à la lecture de l'outil, à la base, à l'API et à la page) : tout concorde pour un IRD verrouillé. Déverrouillé (IRD 3 depuis 18:56), l'IRD envoie des valeurs qui n'en sont pas : puissance 0 dBm (les 6 666 lectures déverrouillées de la base étaient à 0 dBm, tracées comme un pic), débit symbole 0, modulation « automatic unknown unknown », et garde son décodage d'avant (son « 6 voies sur 6 actives », débit vidéo). Corrigé : ces valeurs ne sont plus lues, la porteuse garde le débit symbole du dernier lock (en direct et sur une période passée), les anciennes lectures à 0 dBm ne sont plus tracées, la carte affiche « — », mire « red » traduite. Remarques sans correction : les voies audio comptées sont les décodages configurés (IRD 1 : 5 voies dont 2 doublons de PID sur les emplacements 8 et 9) ; après un redémarrage du service pendant un décrochage, le débit symbole de la porteuse reste inconnu en Direct jusqu'au prochain lock.
 - **Version v1.0.1** publiée sur le dépôt public : les corrections de la revue ci-dessous ; workflow vert (39832993194), release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.1 avec `MonitoringSat-Windows.zip` (10 Mo) et notes en français. Service de ce Mac relancé avec cette version.
 - **Revue du code publié** (10 points, tous corrigés) : fichiers de la page revalidés à chaque chargement (plus d'anciens scripts après une mise à jour) ; requêtes refusées si le nom d'hôte n'est ni `localhost` ni une adresse IP (rattachement DNS) ; pages redessinées au plus une fois par seconde au lieu de chaque mesure (CPU) ; Seuils d'alerte lus sur le service (plus de valeurs par défaut enregistrées par erreur) ; adresse FSH4 en cours de saisie gardée quand un appareil change d'état ; journal : plus de navigation après avoir quitté la page, message si l'IRD n'était sur aucune porteuse ; événements sans destination plus présentés comme cliquables ; périodes « constructor »/« toString » refusées ; « injoignable » partout (plus « hors ligne ») ; pause du FSH4 et périodes fixes partagées.

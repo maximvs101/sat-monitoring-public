@@ -67,12 +67,29 @@ class FshClient:
                     raise FshError("connexion fermée par le FSH4")
                 buf += chunk
             return buf.decode(errors="replace").strip()
+        except TimeoutError as e:
+            unknown = self._last_error_is_unknown_command()
+            self.close()
+            if unknown:
+                raise FshError(f"le FSH4 ne connaît pas {cmd} (erreur -113) : option de commande à distance "
+                               "R&S FSH-K40 absente ? Sans elle, le FSH4 ne donne aucune mesure par le réseau") from e
+            raise FshError(f"pas de réponse à {cmd} : {e}") from e
         except OSError as e:
             self.close()
             raise FshError(f"pas de réponse à {cmd} : {e}") from e
         except FshError:
             self.close()
             raise
+
+    def _last_error_is_unknown_command(self) -> bool:
+        """Après une requête restée sans réponse : la file d'erreurs dit-elle « Undefined header » (-113) ?
+        C'est le cas d'un FSH4 sans l'option FSH-K40 (firmware V1.30 et plus). Lecture seule."""
+        try:
+            self._sock.sendall(b"SYST:ERR?\n")
+            answer = self._sock.recv(4096).decode(errors="replace")
+        except OSError:
+            return False
+        return any(line.strip().startswith("-113,") for line in answer.splitlines())
 
     def _float(self, cmd: str) -> float:
         answer = self.query(cmd)

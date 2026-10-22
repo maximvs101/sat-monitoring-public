@@ -39,7 +39,7 @@ const FshPage = (() => {
     dom.meta.textContent = meta;
     dom.toggle.textContent = s.states.fsh === "paused" ? "Reprendre" : "Pause";
     dom.down.hidden = !reason || !live();
-    dom.down.textContent = `FSH4 hors ligne : ${reason}. Les mesures reprendront dès qu'il répondra.`;
+    dom.down.textContent = `Aucune mesure du FSH4 : ${reason}. Les mesures reprendront dès qu'il répondra à ses requêtes.`;
   }
 
   // Porteuse à laquelle chaque marqueur est rattaché sur la période ; « plancher de bruit » sinon.
@@ -72,7 +72,7 @@ const FshPage = (() => {
       const onSelect = (from, to) => go({ period: `${from}-${to}` });
       if (noise.length) charts.noise = Charts.markerChart(dom.noiseZone, noise, fsh.freqs, { onSelect, height: 160 });
       else dom.noiseZone.append(el("p", { className: "muted", textContent: Store.state.states.fsh === "down" && live()
-        ? "Pas de plancher de bruit : FSH4 hors ligne."
+        ? "Pas de plancher de bruit : aucune mesure du FSH4."
         : "Pas de plancher de bruit : aucun marqueur placé hors porteuse sur la période." }));
       if (all.length) charts.all = Charts.markerChart(dom.allZone, all, fsh.freqs, { onSelect, height: 200, label });
       else dom.allZone.append(el("p", { className: "muted", textContent: "Aucun marqueur mesuré sur la période." }));

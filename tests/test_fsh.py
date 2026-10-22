@@ -37,6 +37,22 @@ class FshTest(unittest.TestCase):
         with self.assertRaises(FshError):
             c.read_level(1)
 
+    def test_unlicensed_fsh4_says_so(self):
+        # FSH4 sans l'option FSH-K40 (relevé le 22/10/2026, firmware V2.50) : les commandes de mesure restent sans
+        # réponse et la file d'erreurs donne -113 « Undefined header ». Le message doit le dire en clair.
+        srv, c = self.make({"FREQ:SPAN?": None, "SYST:ERR?": '-113,"Undefined header"'}, timeout_s=0.2)
+        with self.assertRaises(FshError) as ctx:
+            c.read_settings()
+        self.assertIn("FSH-K40", str(ctx.exception))
+        self.assertIn("FREQ:SPAN?", str(ctx.exception))
+
+    def test_silent_fsh4_without_error_keeps_timeout_message(self):
+        _, c = self.make({"FREQ:SPAN?": None, "SYST:ERR?": '0,"No error"'}, timeout_s=0.2)
+        with self.assertRaises(FshError) as ctx:
+            c.read_settings()
+        self.assertNotIn("FSH-K40", str(ctx.exception))
+        self.assertIn("pas de réponse à FREQ:SPAN?", str(ctx.exception))
+
     def test_non_numeric_raises(self):
         _, c = self.make({**OK, "CALC:MARK1:Y?": "abc"})
         with self.assertRaises(FshError):
