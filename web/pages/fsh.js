@@ -4,7 +4,6 @@
 // la période avec leur porteuse (pour retrouver le niveau RF d'une porteuse disparue), événements du FSH4.
 
 const FshPage = (() => {
-  const POL_NAME = { vertical: "verticale", horizontal: "horizontale" };
   let route = null;
   let dom = null;
   let unsubscribe = null;
@@ -21,15 +20,6 @@ const FshPage = (() => {
 
   function range() {
     return live() ? Store.liveRange() : [data.from, data.to];
-  }
-
-  async function toggle() {
-    const action = Store.state.states.fsh === "paused" ? "resume" : "pause";
-    try {
-      await Store.post(`/api/fsh/${action}`);
-    } catch (e) {
-      alert(`${action === "pause" ? "Pause" : "Reprise"} du FSH4 impossible : ${e.message}`);
-    }
   }
 
   function renderHead() {
@@ -148,7 +138,7 @@ const FshPage = (() => {
       const past = await Store.loadRange(from, to, Math.max(500, Math.round((dom.allZone.clientWidth || 1000) * 1.5)));
       if (mine !== seq || !dom) return;
       data = past;
-      dom.status.textContent = route.period in { "1h": 1, "24h": 1, "7j": 1, "30j": 1 } ? "" : periodLabel(route.period, 0);
+      dom.status.textContent = isFixedPeriod(route.period) ? "" : periodLabel(route.period, 0);
       render();
     } catch (e) {
       if (mine !== seq || !dom) return;
@@ -168,7 +158,7 @@ const FshPage = (() => {
       state: el("span", { className: "badge" }),
       meta: el("span", { className: "meta" }),
       status: el("span", { className: "meta" }),
-      toggle: button("Pause", toggle, { small: true }),
+      toggle: button("Pause", () => toggleFshPause(), { small: true }),
       down: el("p", { className: "banner bad", hidden: true }),
       ifBanner: el("p", { className: "banner", hidden: true,
         textContent: "Décalage LNB non réglé sur le FSH4 : les marqueurs sont en fréquence intermédiaire." }),

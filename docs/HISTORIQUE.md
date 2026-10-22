@@ -2,7 +2,7 @@
 
 ## État actuel (22 octobre 2026, fin de journée)
 
-- Branche `main` ; 252 tests Python et 11 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 255 tests Python et 13 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) sur 12 583,0 V, programme P100/2.
@@ -31,7 +31,10 @@
 
 ## 22 octobre 2026
 
+- **Version v1.0.1** (préparée, publiée au push du tag `v1.0.1` sur le dépôt public) : les corrections de la revue ci-dessous, nouvel exécutable Windows.
+- **Revue du code publié** (10 points, tous corrigés) : fichiers de la page revalidés à chaque chargement (plus d'anciens scripts après une mise à jour) ; requêtes refusées si le nom d'hôte n'est ni `localhost` ni une adresse IP (rattachement DNS) ; pages redessinées au plus une fois par seconde au lieu de chaque mesure (CPU) ; Seuils d'alerte lus sur le service (plus de valeurs par défaut enregistrées par erreur) ; adresse FSH4 en cours de saisie gardée quand un appareil change d'état ; journal : plus de navigation après avoir quitté la page, message si l'IRD n'était sur aucune porteuse ; événements sans destination plus présentés comme cliquables ; périodes « constructor »/« toString » refusées ; « injoignable » partout (plus « hors ligne ») ; pause du FSH4 et périodes fixes partagées.
 - **Dépôt public** : publication d'une copie nettoyée (`sat-monitoring-public`), où les adresses, les numéros de série et les noms de programme du site sont remplacés par des exemples ; workflow « Exécutable Windows » vert à la première exécution (tests, exécutable essayé, archive de 10 Mo).
+- **Version v1.0.0** publiée : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.0 avec `MonitoringSat-Windows.zip` (10 Mo) et notes en français.
 - **Documentation** : README raccourci (description, lancement, pages, limites, exécutable, tests) ; le détail (page, alertes, réglages, marqueurs, données, API) est passé dans `docs/GUIDE.md`.
 - **Refonte de la page** (spec et plan du 22/10, `docs/superpowers/`) : style unique, clair et sobre (une feuille `web/style.css` à variables) ; menu à gauche (vue d'ensemble, une entrée par porteuse avec ses alertes, journal, analyseur FSH4, réglages) ; adresses par page (`#/porteuse/…?p=24h`), Précédent fonctionnel. Remplacent les onglets Direct / Historique et les fenêtres Appareils… / Porteuses… / Seuils… :
   - vue d'ensemble : chiffres clés, une carte par IRD (même composant partout), événements, plancher de bruit ;

@@ -37,15 +37,6 @@ const OverviewPage = (() => {
     return box;
   }
 
-  async function toggleFsh() {
-    const action = Store.state.states.fsh === "paused" ? "resume" : "pause";
-    try {
-      await Store.post(`/api/fsh/${action}`);
-    } catch (e) {
-      alert(`${action === "pause" ? "Pause" : "Reprise"} du FSH4 impossible : ${e.message}`);
-    }
-  }
-
   function renderKpis() {
     const s = Store.state;
     const up = s.followed.filter((x) => s.states[`ird:${x}`] === "up").length;
@@ -68,7 +59,7 @@ const OverviewPage = (() => {
         { tone: open.some((e) => e.severity === "critical") ? "bad" : open.length ? "warn" : "" }),
       kpi("Marge la plus basse", low ? fmt(low.v, 1, "dB") : "—", { small: low ? s.names[low.serial] || low.serial : "" }),
       kpi("Analyseur FSH4", fshLabel, { tone: fshTone === "bad" ? "bad" : "",
-        foot: el("div", { className: "foot" }, button(s.states.fsh === "paused" ? "Reprendre" : "Pause", toggleFsh, { small: true }),
+        foot: el("div", { className: "foot" }, button(s.states.fsh === "paused" ? "Reprendre" : "Pause", () => toggleFshPause(), { small: true }),
           el("a", { href: routeHref({ page: "fsh" }), textContent: "Analyseur →" })) }),
     );
   }
@@ -96,8 +87,12 @@ const OverviewPage = (() => {
     });
   }
 
+  function targetOf(ev) {
+    return eventTarget(ev, Store.state.carriers, Date.now(), Store.state.cfg.event_padding_s * 1000);
+  }
+
   function onEventClick(ev) {
-    const target = eventTarget(ev, Store.state.carriers, Date.now(), Store.state.cfg.event_padding_s * 1000);
+    const target = targetOf(ev);
     if (target) location.hash = routeHref(target);
   }
 
@@ -106,7 +101,7 @@ const OverviewPage = (() => {
     const sig = JSON.stringify(events.map((e) => [e.id, e.ts_end, e.detail]));
     if (sig === sigs.events) return;
     sigs.events = sig;
-    dom.events.replaceChildren(events.length ? eventList(events, { onClick: onEventClick }) : emptyState("Aucun événement récent."));
+    dom.events.replaceChildren(events.length ? eventList(events, { onClick: onEventClick, isLink: (ev) => !!targetOf(ev) }) : emptyState("Aucun événement récent."));
   }
 
   // Plancher de bruit : marqueurs placés hors porteuse (recréé quand ils changent).

@@ -5,8 +5,6 @@
 
 const SettingsPage = (() => {
   const TITLES = { appareils: "Appareils", porteuses: "Porteuses", seuils: "Seuils d'alerte" };
-  const DEVICE_STATES = { up: "connecté", down: "injoignable", unknown: "en attente", paused: "en pause" };
-  const POL_NAME = { vertical: "verticale", horizontal: "horizontale" };
   const POL_OPTIONS = [["vertical", "verticale"], ["horizontal", "horizontale"]];
   let route = null;
   let dom = null;
@@ -54,27 +52,36 @@ const SettingsPage = (() => {
 
   // ----- Appareils -----
 
-  function fshForm(fsh) {
-    const host = el("input", { className: "input", value: fsh.host, required: true, spellcheck: false });
-    const port = el("input", { className: "input", type: "number", min: 1, max: 65535, value: fsh.port, required: true });
-    const pol = select([["", "inconnue"], ...POL_OPTIONS], fsh.polarization);
+  // Carte du FSH4. Tant que le formulaire a des modifications non enregistrées, il est gardé tel quel d'un
+  // rafraîchissement à l'autre (seuls l'état et le bouton de pause sont redessinés).
+  function fshCard(fsh) {
     const err = dom.fshErr ??= errorBox();  // gardée d'un rafraîchissement à l'autre
-    const form = el("form", { className: "form-row" }, field("Adresse", host), field("Port", port), field("Entrée (polarisation)", pol),
-      el("button", { type: "submit", className: "btn primary", textContent: "Enregistrer" }));
-    form.addEventListener("submit", (e) => {
-      e.preventDefault();
-      act(() => Store.post("/api/fsh", { host: host.value.trim(), port: Number(port.value), polarization: pol.value || null }), err);
-    });
+    if (!dom.fshDirty || !dom.fshForm) dom.fshForm = fshForm(fsh, err);
     const paused = Store.state.states.fsh === "paused";
-    const pause = button(paused ? "Reprendre les mesures" : "Mettre en pause",
-      () => act(() => Store.post(`/api/fsh/${paused ? "resume" : "pause"}`), err), { small: true });
-    const [label, tone] = DEVICE_STATE[Store.state.states.fsh] || ["en attente", ""];
-    dom.fshHost = host;
-    dom.fshPort = port;
+    const pause = button(paused ? "Reprendre les mesures" : "Mettre en pause", () => toggleFshPause((m) => showError(err, m)), { small: true });
+    const [label, tone] = DEVICE_STATE[Store.state.states.fsh] || DEVICE_STATE.unknown;
     const seen = Store.state.seen.fsh ? ` · dernière mesure ${fmtDateTime(Store.state.seen.fsh)}` : "";
     return cardBox(el("div", { className: "card-title" }, el("span", {}, "FSH4 ", el("span", { className: `badge ${tone}`, textContent: label }),
       el("small", { className: "muted", textContent: seen })), pause),
-      el("p", { className: "muted note", textContent: "Le service lit les réglages du FSH4 sans jamais les modifier." }), form, err);
+      el("p", { className: "muted note", textContent: "Le service lit les réglages du FSH4 sans jamais les modifier." }), dom.fshForm, err);
+  }
+
+  function fshForm(fsh, err) {
+    const host = el("input", { className: "input", value: fsh.host, required: true, spellcheck: false });
+    const port = el("input", { className: "input", type: "number", min: 1, max: 65535, value: fsh.port, required: true });
+    const pol = select([["", "inconnue"], ...POL_OPTIONS], fsh.polarization);
+    const form = el("form", { className: "form-row" }, field("Adresse", host), field("Port", port), field("Entrée (polarisation)", pol),
+      el("button", { type: "submit", className: "btn primary", textContent: "Enregistrer" }));
+    form.addEventListener("input", () => { dom.fshDirty = true; });
+    form.addEventListener("change", () => { dom.fshDirty = true; });
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      dom.fshDirty = false;
+      act(() => Store.post("/api/fsh", { host: host.value.trim(), port: Number(port.value), polarization: pol.value || null }), err);
+    });
+    dom.fshHost = host;
+    dom.fshPort = port;
+    return form;
   }
 
   function irdRow(ird, err) {
@@ -92,7 +99,7 @@ const SettingsPage = (() => {
     }, { small: true });
     const tone = { up: "ok", down: "bad" }[ird.state] || "";
     return el("tr", {}, el("td", {}, name), el("td", {}, host), el("td", {}, pol), el("td", { textContent: carrierName(ird.carrier) }),
-      el("td", { title: `n° ${ird.serial}` }, el("span", { className: `badge ${tone}`, textContent: DEVICE_STATES[ird.state] || ird.state }),
+      el("td", { title: `n° ${ird.serial}` }, el("span", { className: `badge ${tone}`, textContent: (DEVICE_STATE[ird.state] || [ird.state])[0] }),
         el("small", { className: "muted seen", textContent: Store.state.seen[`ird:${ird.serial}`]
           ? ` ${fmtTime(Store.state.seen[`ird:${ird.serial}`])}` : "", title: "heure de la dernière mesure" })),
       el("td", {}, remove));
@@ -121,6 +128,7 @@ const SettingsPage = (() => {
         ...foundList("Analyseurs FSH", r.fsh, (f) => [`${f.model} — ${f.host}`, f.detail, "Utiliser"], (f) => {
           dom.fshHost.value = f.host;
           dom.fshPort.value = f.port;
+          dom.fshDirty = true;
           dom.fshHost.focus();
         }),
         ...foundList("IRD Ateme", r.ird,
@@ -161,12 +169,12 @@ const SettingsPage = (() => {
     if (mine !== seq || !dom) return;
     // La recherche sur le réseau et ses résultats survivent aux rafraîchissements.
     if (!dom.irdsCard) {
-      dom.fshCard = fshForm(d.fsh);
+      dom.fshCard = fshCard(d.fsh);
       dom.irdsCard = irdsCard(d.irds);
       dom.body.replaceChildren(dom.fshCard, dom.irdsCard);
       return;
     }
-    const fsh = fshForm(d.fsh);
+    const fsh = fshCard(d.fsh);
     dom.fshCard.replaceWith(fsh);
     dom.fshCard = fsh;
     const err = dom.irdsCard.querySelector(".error");
@@ -221,8 +229,10 @@ const SettingsPage = (() => {
 
   // ----- Seuils -----
 
-  function renderThresholds() {
-    const cfg = Store.state.cfg;
+  // Valeurs lues sur le service au moment d'afficher la page (jamais les valeurs par défaut de la page).
+  async function renderThresholds(mine) {
+    const cfg = (await Store.getJSON("/api/status")).config;
+    if (mine !== seq || !dom) return;
     const drop = el("input", { className: "input", type: "number", min: "0.5", max: "20", step: "0.1", required: true, value: cfg.margin_drop_db ?? 2 });
     const min = el("input", { className: "input", type: "number", min: "0", max: "30", step: "0.1", required: true, value: cfg.margin_min_db ?? 0 });
     const err = errorBox();
@@ -254,7 +264,7 @@ const SettingsPage = (() => {
     try {
       if (route.tab === "appareils") await renderDevices(mine);
       else if (route.tab === "porteuses") await renderCarriers(mine);
-      else if (mine === seq) renderThresholds();
+      else await renderThresholds(mine);
     } catch (e) {
       if (mine === seq && dom) dom.body.replaceChildren(el("p", { className: "error", textContent: `Chargement impossible : ${e.message}` }));
     }

@@ -44,7 +44,7 @@ const Nav = (() => {
 
   function init(el_) {
     root = el_;
-    Store.subscribe((kind) => { if (kind !== "live" && kind !== "tick") render(); });
+    Store.subscribe((kind) => { if (kind !== "tick") render(); });
   }
 
   function setRoute(r) {

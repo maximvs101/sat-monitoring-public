@@ -128,7 +128,7 @@ Toutes les réponses sont en JSON ; horodatages en millisecondes.
 | `POST /api/detect` | seuils de marge : `margin_drop_db` (0,5 à 20), `margin_min_db` (0 à 30, 0 = désactivée) |
 | `POST /api/discover` | recherche réseau |
 
-Les `POST` ne sont acceptés que depuis la page elle-même (même origine).
+Les `POST` ne sont acceptés que depuis la page elle-même (même origine). Toute requête dont le nom d'hôte n'est ni `localhost` ni une adresse IP est refusée (protection contre le rattachement DNS : une page d'un autre site ne peut pas lire les données du service). Les fichiers de la page sont revalidés à chaque chargement (`Cache-Control: no-cache`) : après une mise à jour, le navigateur ne garde pas d'anciens scripts.
 
 ## Limites en détail
 

@@ -71,6 +71,32 @@ class ServerTest(unittest.TestCase):
         for loop in self.app.ird_loops.values():
             loop.step()
 
+    def raw_response(self, method, path, headers=None):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request(method, path, headers=headers or {})
+        r = c.getresponse()
+        r.read()
+        c.close()
+        return r
+
+    # --- page et nom d'hôte ---
+
+    def test_static_files_are_revalidated(self):
+        # Après une mise à jour, le navigateur ne doit pas garder d'anciens scripts en cache.
+        r = self.raw_response("GET", "/")
+        self.assertEqual(r.status, 200)
+        self.assertEqual(r.getheader("Cache-Control"), "no-cache")
+
+    def test_host_by_name_refused(self):
+        # Rattachement DNS : un nom de domaine qui pointe vers 127.0.0.1 ne doit rien lire.
+        for path in ("/", "/api/status"):
+            self.assertEqual(self.raw_response("GET", path, {"Host": f"evil.example:{self.port}"}).status, 403, path)
+        self.assertEqual(self.raw_response("POST", "/api/fsh/pause", {"Host": "evil.example"}).status, 403)
+
+    def test_host_localhost_or_ip_accepted(self):
+        for host in (f"localhost:{self.port}", f"127.0.0.1:{self.port}", f"[::1]:{self.port}", "192.168.1.20:8080"):
+            self.assertEqual(self.raw_response("GET", "/api/status", {"Host": host}).status, 200, host)
+
     # --- lecture ---
 
     def test_status(self):

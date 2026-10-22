@@ -51,19 +51,24 @@ function routeHref(route) {
 
 // --- Périodes : « live » (fenêtre du direct), 1h, 24h, 7j, 30j, ou « <début>-<fin> » en ms ---
 
+// Période prédéfinie (1h, 24h, 7j, 30j) ; propres clés seulement (« constructor » n'en est pas une).
+function isFixedPeriod(period) {
+  return typeof period === "string" && Object.hasOwn(FIXED_PERIODS, period);
+}
+
 function isLive(period) {
-  return !period || period === "live" || !(period in FIXED_PERIODS || CUSTOM_PERIOD.test(period));
+  return !period || period === "live" || !(isFixedPeriod(period) || CUSTOM_PERIOD.test(period));
 }
 
 function periodRange(period, now, liveMin) {
-  if (period in FIXED_PERIODS) return [now - FIXED_PERIODS[period], now];
+  if (isFixedPeriod(period)) return [now - FIXED_PERIODS[period], now];
   const m = CUSTOM_PERIOD.exec(period || "");
   if (m && Number(m[1]) < Number(m[2])) return [Number(m[1]), Number(m[2])];
   return [now - liveMin * 60_000, now];
 }
 
 function periodLabel(period, liveMin) {
-  if (period in FIXED_LABELS) return FIXED_LABELS[period];
+  if (isFixedPeriod(period)) return FIXED_LABELS[period];
   const m = CUSTOM_PERIOD.exec(period || "");
   if (m && Number(m[1]) < Number(m[2])) {
     const d = (ms) => new Date(ms).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
@@ -156,6 +161,6 @@ function eventTarget(ev, carriersAt, now, padMs) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isLive, periodRange, periodLabel, carrierKeyRef,
+  module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
     matchCarrier, periodSummary, irdStatus, eventTarget };
 }

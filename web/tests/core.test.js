@@ -118,3 +118,15 @@ test("formats à la française", () => {
   assert.equal(core.fmt(null, 1, "dB"), "—");
   assert.equal(core.fmtBer(0), "< 1e-8");
 });
+
+test("périodes : clés héritées refusées, isFixedPeriod", () => {
+  const { isLive, periodRange, isFixedPeriod } = core;
+  for (const p of ["constructor", "toString", "__proto__"]) {
+    assert.strictEqual(isLive(p), true, p);
+    assert.deepStrictEqual(periodRange(p, NOW, 10), [NOW - 600_000, NOW], p);
+    assert.strictEqual(isFixedPeriod(p), false, p);
+  }
+  assert.strictEqual(isFixedPeriod("7j"), true);
+  assert.strictEqual(isFixedPeriod("1-2"), false);
+  assert.strictEqual(isFixedPeriod(undefined), false);
+});

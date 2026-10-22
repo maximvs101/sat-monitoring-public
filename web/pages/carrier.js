@@ -283,7 +283,7 @@ const CarrierPage = (() => {
         gone ? el("p", { className: "banner", textContent: "Cette porteuse n'existe plus aujourd'hui : elle est affichée telle qu'elle était sur la période." }) : null,
         past.aggregated ? el("p", { className: "muted note", textContent: "Période longue : points regroupés (moyenne de chaque intervalle ; la marge minimale des résumés reste exacte)." }) : null,
       ].filter(Boolean));
-      dom.status.textContent = route.period in { "1h": 1, "24h": 1, "7j": 1, "30j": 1 } ? "" : periodLabel(route.period, Store.state.cfg.live_window_min);
+      dom.status.textContent = isFixedPeriod(route.period) ? "" : periodLabel(route.period, Store.state.cfg.live_window_min);
       render();
     } catch (e) {
       if (mine !== seq || !dom) return;

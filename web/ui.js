@@ -22,7 +22,8 @@ const KINDS = {
   ird_log: "Journal IRD",
 };
 const SEVERITY_TONE = { critical: "bad", warning: "warn", info: "ok" };
-const DEVICE_STATE = { up: ["connecté", "ok"], down: ["hors ligne", "bad"], paused: ["en pause", ""], unknown: ["en attente", ""] };
+const DEVICE_STATE = { up: ["connecté", "ok"], down: ["injoignable", "bad"], paused: ["en pause", ""], unknown: ["en attente", ""] };
+const POL_NAME = { vertical: "verticale", horizontal: "horizontale" };
 // Classe de couleur d'un code de la bande « État » (0 à 3), ou « down » / « idle ».
 const TONE_OF_CODE = { 0: "ok", 1: "warn", 2: "violet", 3: "bad", down: "bad", idle: "" };
 
@@ -39,6 +40,16 @@ function liveStatus() {
   if (s.connected) return `en direct · ${fmtDateTime(Date.now())}`;
   const last = Math.max(0, ...Object.values(s.seen).filter(Boolean));
   return `connexion perdue${last ? ` · dernière mesure ${fmtDateTime(last)}` : ""}`;
+}
+
+// Pause / reprise de la lecture du FSH4 (rend la main sur l'appareil) ; erreur affichée par `onError`.
+async function toggleFshPause(onError = (m) => alert(m)) {
+  const action = Store.state.states.fsh === "paused" ? "resume" : "pause";
+  try {
+    await Store.post(`/api/fsh/${action}`);
+  } catch (e) {
+    onError(`${action === "pause" ? "Pause" : "Reprise"} du FSH4 impossible : ${e.message}`);
+  }
 }
 
 function button(label, onClick, { primary = false, small = false } = {}) {
@@ -66,19 +77,21 @@ function eventSource(ev, names = Store.state.names) {
   return "FSH4";
 }
 
-// Liste d'événements : gravité en couleur, type, source, début → fin ou « en cours », détail. `onClick(ev)` facultatif.
-function eventList(events, { onClick = null, names } = {}) {
+// Liste d'événements : gravité en couleur, type, source, début → fin ou « en cours », détail. `onClick(ev)` facultatif ;
+// `isLink(ev)` dit si un événement mène quelque part (sinon il n'a pas l'air cliquable).
+function eventList(events, { onClick = null, isLink = () => true, names } = {}) {
   const list = el("ul", { className: "events" });
   for (const ev of events) {
     const when = el("div", { className: "when num",
       textContent: fmtDateTime(ev.ts_start) + (ev.ts_end == null ? "" : ` → ${fmtTime(ev.ts_end)}`) });
     if (ev.ts_end == null) when.append(el("span", { className: "open", textContent: " — en cours" }));
-    const item = el("li", { className: `event${onClick ? " link" : ""}` },
+    const link = !!onClick && isLink(ev);
+    const item = el("li", { className: `event${link ? " link" : ""}` },
       el("span", { className: `dot ${SEVERITY_TONE[ev.severity] || ""}` }),
       el("div", {}, el("span", { className: "what", textContent: KINDS[ev.kind] || ev.kind }),
         el("span", { className: "src", textContent: ` · ${eventSource(ev, names)}` }), when,
         el("div", { className: "detail", textContent: ev.detail })));
-    if (onClick) item.addEventListener("click", () => onClick(ev));
+    if (link) item.addEventListener("click", () => onClick(ev));
     list.append(item);
   }
   return list;

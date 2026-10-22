@@ -125,8 +125,10 @@ def make_server(app: App) -> ThreadingHTTPServer:
         def log_message(self, fmt, *args):
             log.debug("HTTP %s", fmt % args)
 
-        def _send(self, status, body=b"", ctype="application/json; charset=utf-8"):
+        def _send(self, status, body=b"", ctype="application/json; charset=utf-8", headers=()):
             self.send_response(status)
+            for name, value in headers:
+                self.send_header(name, value)
             if body or status != 204:
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
@@ -146,9 +148,24 @@ def make_server(app: App) -> ThreadingHTTPServer:
                 raise ValueError("from > to")
             return from_ts, to_ts
 
+        def _host_allowed(self) -> bool:
+            # Rattachement DNS : une page d'un autre site dont le nom pointe vers cette machine ne doit rien lire.
+            # Seuls « localhost » et les adresses IP (consultation depuis le réseau) sont acceptés.
+            host = (self.headers.get("Host") or "").strip()
+            name = host[1:host.find("]")] if host.startswith("[") else host.rsplit(":", 1)[0]
+            if name.lower() == "localhost":
+                return True
+            try:
+                ipaddress.ip_address(name)
+                return True
+            except ValueError:
+                return False
+
         def _guarded(self, handler):
             """Une erreur imprévue renvoie une 500 lisible par la page, au lieu de couper la connexion."""
             try:
+                if not self._host_allowed():
+                    return self._error(403, "nom d'hôte refusé")
                 return handler()
             except (BrokenPipeError, ConnectionResetError):
                 pass  # client parti (page fermée, flux direct interrompu)
@@ -301,7 +318,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
             ctype = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
             if ctype.startswith("text/") or ctype == "application/javascript":
                 ctype += "; charset=utf-8"
-            self._send(200, target.read_bytes(), ctype)
+            # Revalidé à chaque chargement : après une mise à jour, pas d'anciens scripts gardés en cache.
+            self._send(200, target.read_bytes(), ctype, headers=(("Cache-Control", "no-cache"),))
 
         def _live(self):
             q = app.bus.subscribe()

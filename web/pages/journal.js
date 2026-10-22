@@ -45,6 +45,7 @@ const JournalPage = (() => {
   }
 
   async function onEventClick(ev) {
+    const page = dom;  // page quittée pendant le chargement : pas de navigation
     const pad = Store.state.cfg.event_padding_s * 1000;
     let carriers = Store.state.carriers;
     if (ev.source?.startsWith("ird:")) {
@@ -52,12 +53,19 @@ const JournalPage = (() => {
       try {
         carriers = (await Store.loadRange(ev.ts_start - pad, (ev.ts_end ?? Date.now()) + pad, 50)).carriers;
       } catch (e) {
-        alert(`Chargement impossible : ${e.message}`);
+        if (dom === page) showNotice(`Chargement impossible : ${e.message}`);
         return;
       }
     }
+    if (dom !== page) return;
     const target = eventTarget(ev, carriers, Date.now(), pad);
     if (target) location.hash = routeHref(target);
+    else showNotice(`${eventSource(ev)} n'appartenait à aucune porteuse à ce moment-là : pas de page à ouvrir.`);
+  }
+
+  function showNotice(text) {
+    dom.error.hidden = false;
+    dom.error.textContent = text;
   }
 
   function render() {
@@ -95,7 +103,7 @@ const JournalPage = (() => {
   // Périodes glissantes : nouvel événement ou fin d'un événement → liste rechargée (au plus une fois par seconde).
   function onStore(kind) {
     if (kind !== "event" && kind !== "reload") return;
-    if (!(period() in { "24h": 1, "7j": 1, "30j": 1 })) return;
+    if (!isFixedPeriod(period())) return;
     clearTimeout(refresh);
     refresh = setTimeout(load, 1000);
   }

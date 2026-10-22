@@ -33,7 +33,7 @@ const Store = (() => {
     }
   }
 
-  // fn(kind) : « status », « live » (mesure), « event », « state », « tick » (chaque seconde), « reload ».
+  // fn(kind) : « event », « state », « tick » (chaque seconde, mesures reçues comprises), « reload ».
   function subscribe(fn) {
     subscribers.add(fn);
     return () => subscribers.delete(fn);
@@ -201,8 +201,7 @@ const Store = (() => {
     if (msg.type === "markers" || msg.type === "ird") {
       state.seen[msg.type === "markers" ? "fsh" : `ird:${msg.serial}`] = msg.ts;
       if (pending) pending.push(msg);
-      else appendLive(msg);
-      notify("live");
+      else appendLive(msg);  // affiché au prochain « tick » : au plus un rendu par seconde, quel que soit le débit
     } else if (msg.type === "state") {
       state.states[msg.device] = msg.state;
       state.details[msg.device] = msg.detail || "";
