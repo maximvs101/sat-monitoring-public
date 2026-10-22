@@ -1,25 +1,30 @@
 # Historique
 
-## État actuel (22 octobre 2026, fin de journée)
+## État actuel (22 octobre 2026, soir)
 
 - Branche `main` ; 255 tests Python et 13 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
 - Site actuel : réseau 192.168.10.x.
-  - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) sur 12 583,0 V, programme P100/2.
-  - IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) sur 12 592,0 V, programme P100/9.
-  - Les deux à environ 0,99 lecture/s, marge 7 dB, état normal.
+  - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) sur la porteuse « C1 » (12 583,0 V), programme P100/2, marge 6,3 dB, état normal.
+  - IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) sur la porteuse « C2 » (12 592,0 V) : joignable mais **lock perdu depuis 18:56 le 22/10** (puissance d'entrée 0 dBm, marge 0), alerte en cours ; côté réception, pas lié au code.
   - FSH4 (192.168.10.224) injoignable : son alerte « Appareil injoignable » reste en cours, la puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : `MonitoringSat.exe` fabriqué par le workflow « Exécutable Windows » (dernière exécution verte : n° 3, version nettoyée `c68ae16`, archive dans ses Artifacts : (onglet Actions du dépôt)) ; pas encore essayé sur un PC du site.
+- Windows : versions publiées sur le dépôt public, dernière **v1.0.1** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.1, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
 ## À faire
 
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
-- Essayer `MonitoringSat.exe` sur un vrai PC Windows du réseau des appareils (archive de l'exécution n° 3 du workflow, ou relancer le workflow : onglet Actions → « Exécutable Windows » → Run workflow). Pour une version publiée : pousser un tag `v…`.
+- Essayer `MonitoringSat.exe` (release v1.0.1) sur un vrai PC Windows du réseau des appareils. Nouvelle version : pousser un tag `v…`.
 - Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
 - Point mineur reporté de la revue du 22/10 : une seule cause ouvre plusieurs critiques (flux arrêté + image perdue).
+- Points mineurs reportés de la refonte de la page (22/10) :
+  - carte « Plancher de bruit » de la vue d'ensemble sans lien vers l'analyseur FSH4 ;
+  - menu sans entrée en surbrillance quand la clé de la porteuse ouverte change (ex. 125830-? → 125830-V) ;
+  - journal chargé sans limite de nombre (34 événements sur 30 j aujourd'hui) ;
+  - clé à polarisation inconnue avec deux porteuses V et H de même fréquence : correspondance au plus proche, arbitraire ;
+  - fréquence d'une porteuse saisie : le service accepte toute valeur positive.
 - Points mineurs reportés de la vérification complète du 22/10 :
   - alertes de réception (lock, BER, marge) et warnings du journal restent ouverts pendant qu'un IRD est injoignable ; `device_down` du FSH4 reste ouvert pendant une pause, avec « fsh » pour seul détail ;
   - cadence : la durée du traitement (base, détection) s'ajoute à la période ; plus de 10 réponses « occupé » de suite comptent comme échecs ;
@@ -31,7 +36,7 @@
 
 ## 22 octobre 2026
 
-- **Version v1.0.1** (préparée, publiée au push du tag `v1.0.1` sur le dépôt public) : les corrections de la revue ci-dessous, nouvel exécutable Windows.
+- **Version v1.0.1** publiée sur le dépôt public : les corrections de la revue ci-dessous ; workflow vert (39832993194), release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.1 avec `MonitoringSat-Windows.zip` (10 Mo) et notes en français. Service de ce Mac relancé avec cette version.
 - **Revue du code publié** (10 points, tous corrigés) : fichiers de la page revalidés à chaque chargement (plus d'anciens scripts après une mise à jour) ; requêtes refusées si le nom d'hôte n'est ni `localhost` ni une adresse IP (rattachement DNS) ; pages redessinées au plus une fois par seconde au lieu de chaque mesure (CPU) ; Seuils d'alerte lus sur le service (plus de valeurs par défaut enregistrées par erreur) ; adresse FSH4 en cours de saisie gardée quand un appareil change d'état ; journal : plus de navigation après avoir quitté la page, message si l'IRD n'était sur aucune porteuse ; événements sans destination plus présentés comme cliquables ; périodes « constructor »/« toString » refusées ; « injoignable » partout (plus « hors ligne ») ; pause du FSH4 et périodes fixes partagées.
 - **Dépôt public** : publication d'une copie nettoyée (`sat-monitoring-public`), où les adresses, les numéros de série et les noms de programme du site sont remplacés par des exemples ; workflow « Exécutable Windows » vert à la première exécution (tests, exécutable essayé, archive de 10 Mo).
 - **Version v1.0.0** publiée : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.0 avec `MonitoringSat-Windows.zip` (10 Mo) et notes en français.
