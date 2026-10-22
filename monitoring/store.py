@@ -51,6 +51,9 @@ HEALTH_COLUMNS = ["fpga_temp", "cpu_temp", *HEALTH_FAULTS]
 IRD_COLUMNS = ["locked", "ts_locked", "cn_db", "margin_db", "ber", "ber_raw", "power_dbm",
                "if_khz", "symbol_rate", "modcod", "bitrate_kbps", "rf_khz", "polarization", "roll_off",
                *[c for c in DECODE_COLUMNS if c != "state"]]
+# Colonnes lues à travers une expression : la puissance d'un IRD déverrouillé valait 0 dBm (valeur de l'IRD, pas
+# une mesure) dans les lectures enregistrées avant le 22/10/2026 au soir.
+SERIES_EXPRESSIONS = {("ird_sat", "power_dbm"): "CASE WHEN locked = 0 THEN NULL ELSE power_dbm END"}
 IRD_SERIES_COLUMNS = ["locked", "ts_locked", "cn_db", "margin_db", "ber", "power_dbm", "state"]
 TUNING_COLUMNS = ["rf_khz", "polarization", "symbol_rate", "roll_off"]
 EVENT_COLUMNS = ["id", "ts_start", "ts_end", "kind", "severity", "detail", "source"]
@@ -179,6 +182,13 @@ class Store:
             row = self._all(f"SELECT {', '.join(TUNING_COLUMNS)} FROM ird_sat WHERE ird = ? AND ts >= ? AND ts <= ? "
                             "AND rf_khz IS NOT NULL ORDER BY ts DESC, rowid DESC LIMIT 1", (serial, from_ts, to_ts))
             s["tuning"] = dict(zip(TUNING_COLUMNS, row[0])) if row else None
+            if s["tuning"] and not s["tuning"]["symbol_rate"]:
+                # Déverrouillé en fin de période : débit symbole et roll-off du dernier lock sur cette fréquence.
+                # Même porteuse : à moins d'un demi-débit symbole (fréquence mesurée contre fréquence configurée).
+                last = self._all("SELECT symbol_rate, roll_off FROM ird_sat WHERE ird = ? AND ts <= ? AND locked = 1 "
+                                 "AND symbol_rate > 0 AND ABS(rf_khz - ?) * 2000 < symbol_rate ORDER BY ts DESC LIMIT 1",
+                                 (serial, to_ts, s["tuning"]["rf_khz"]))
+                s["tuning"]["symbol_rate"], s["tuning"]["roll_off"] = last[0] if last else (None, None)
             s["segments"] = self._segments(serial, from_ts, to_ts)
             out[serial] = s
         return out
@@ -219,8 +229,9 @@ class Store:
         if ird is not None:
             where, params = where + " AND ird = ?", params + (ird,)
         count = self._all(f"SELECT COUNT(*) FROM {table} WHERE {where}", params)[0][0]
+        expr = {c: SERIES_EXPRESSIONS.get((table, c), c) for c in columns}
         if count <= max_points:
-            rows = self._all(f"SELECT ts, {', '.join(columns)} FROM {table} WHERE {where} ORDER BY ts", params)
+            rows = self._all(f"SELECT ts, {', '.join(expr[c] for c in columns)} FROM {table} WHERE {where} ORDER BY ts", params)
             out = {"aggregated": False, "ts": [r[0] for r in rows]}
             for i, c in enumerate(columns, 1):
                 out[c] = [r[i] for r in rows]
@@ -229,8 +240,9 @@ class Store:
         bucket = max(1, math.ceil((to_ts - from_ts) / max_points))
         exprs = []
         for c in columns:
-            main = f"MIN({c})" if c in MIN_AGGREGATED else f"MAX({c})" if c in MAX_AGGREGATED else f"AVG({c})"
-            exprs += [main, f"MIN({c})", f"MAX({c})"]
+            e = expr[c]
+            main = f"MIN({e})" if c in MIN_AGGREGATED else f"MAX({e})" if c in MAX_AGGREGATED else f"AVG({e})"
+            exprs += [main, f"MIN({e})", f"MAX({e})"]
         rows = self._all(
             f"SELECT (ts - ?) / ? AS b, {', '.join(exprs)} FROM {table} WHERE {where} GROUP BY b ORDER BY b",
             (from_ts, bucket, *params))

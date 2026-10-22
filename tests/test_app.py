@@ -85,6 +85,21 @@ class AppTest(unittest.TestCase):
         [carrier] = st["carriers"]
         self.assertEqual((carrier["key"], carrier["irds"]), ("125830-V", ["S1", "S2"]))
 
+    def test_unlocked_ird_keeps_carrier_symbol_rate(self):
+        # Pendant un décrochage, la porteuse garde le débit symbole du dernier lock (largeur de bande, tolérance).
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.step_irds(app)
+        # Déverrouillé, la fréquence est la fréquence configurée, à quelques kHz de la mesurée.
+        self.irds.samples["S1"] = replace(sample(locked=False, rf_khz=12_583_060), symbol_rate=None, roll_off=None, modcod=None)
+        self.step_irds(app)
+        [carrier] = app.status()["carriers"]
+        self.assertEqual((carrier["symbol_rate"], carrier["roll_off"]), (7_200_000, 0.25))
+        # Re-réglé sur une autre porteuse sans lock : pas de débit symbole hérité.
+        self.irds.samples["S1"] = replace(sample(locked=False, rf_khz=11_000_000), symbol_rate=None, roll_off=None, modcod=None)
+        self.step_irds(app)
+        [carrier] = app.status()["carriers"]
+        self.assertEqual(carrier["symbol_rate"], None)
+
     def test_add_ird_identifies_and_saves(self):
         app = self.make()
         entry = app.add_ird("10.0.0.2")

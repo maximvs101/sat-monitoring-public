@@ -48,6 +48,26 @@ class StoreTest(unittest.TestCase):
         self.assertIn(0, s["locked"])
         self.assertEqual(s["locked"].count(0), 1)
 
+    def test_power_absent_when_unlocked(self):
+        # Les anciennes lectures déverrouillées ont 0 dBm (valeur de l'IRD, pas une mesure) : pas de pic à 0 dBm.
+        for i in range(10):
+            self.store.add_ird(i * 1000, "A", replace(ird(locked=i < 5), power_dbm=0.0 if i >= 5 else -40.0))
+        raw = self.store.series("ird_sat", ["power_dbm"], 0, 10_000, 100)
+        self.assertEqual(raw["power_dbm"], [-40.0] * 5 + [None] * 5)
+        agg = self.store.series("ird_sat", ["power_dbm"], 0, 10_000, 2)
+        self.assertTrue(agg["aggregated"])
+        self.assertEqual([v for v in agg["power_dbm"] if v is not None], [-40.0])
+
+    def test_past_tuning_keeps_symbol_rate_of_last_lock(self):
+        # Déverrouillé, l'IRD ne donne plus de débit symbole : la période passée garde celui du dernier lock.
+        # Verrouillé : fréquence mesurée ; déverrouillé : fréquence configurée, quelques kHz plus loin.
+        self.store.add_ird(1000, "A", replace(ird(), symbol_rate=7_200_000, roll_off=0.25, rf_khz=12_592_023))
+        self.store.add_ird(1500, "A", replace(ird(), symbol_rate=27_500_000, roll_off=0.2, rf_khz=11_000_000))  # autre porteuse
+        self.store.add_ird(1800, "A", replace(ird(), symbol_rate=7_200_000, roll_off=0.25, rf_khz=12_592_031))
+        self.store.add_ird(2000, "A", replace(ird(locked=False), symbol_rate=0, roll_off=0.35, rf_khz=12_592_060))
+        tuning = self.store.ird_series(0, 5000, 100)["A"]["tuning"]
+        self.assertEqual((tuning["rf_khz"], tuning["symbol_rate"], tuning["roll_off"]), (12_592_060, 7_200_000, 0.25))
+
     def test_series_rejects_unknown_column(self):
         with self.assertRaises(ValueError):
             self.store.series("fsh_marker", ["level_dbm; DROP"], 0, 1, 10)

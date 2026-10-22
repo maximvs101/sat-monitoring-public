@@ -62,6 +62,10 @@ Une perte de lock ferme les alertes image, son, déchiffrement et flux en cours 
 
 La référence d'une chute est la médiane de la minute précédente. Elle est figée pendant une alerte et environ deux minutes après (le temps que la fenêtre d'une minute ne contienne plus que des mesures d'après l'alerte), pour qu'un retour partiel ne la fasse pas dériver. Un changement de modulation, de débit symbole ou de porteuse sur un IRD remet sa référence de marge à zéro et ferme une chute de marge en cours (« réception modifiée »).
 
+## IRD déverrouillé
+
+Quand le démodulateur décroche, le DR5000 met sa puissance d'entrée, son débit symbole et sa fréquence intermédiaire à 0 et sa modulation à « automatic unknown unknown », et son décodeur garde ses dernières valeurs (voies audio « actives », débit vidéo). L'outil n'en tient pas compte : puissance, modulation, son et détails de décodage s'affichent « — » (seule la configuration des sorties reste), la porteuse garde le débit symbole du dernier lock, et les anciennes lectures à 0 dBm ne sont plus tracées. La marge, elle, est tracée à 0 dB : c'est le décrochage.
+
 ## Réglages › Seuils d'alerte : alertes sur la marge
 
 Deux réglages, appliqués tout de suite à tous les IRD et enregistrés dans `config.toml` (`[detect]`) :

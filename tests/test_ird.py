@@ -193,6 +193,38 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual((d.asi_descrambled, d.ip_streams, d.genlock), (True, 0, False))
         self.assertEqual((d.loss_pattern, d.loss_freeze_ms), ("blue", 1000))
 
+    # Réponse d'un IRD déverrouillé, relevée sur l'IRD 3 le 22/10/2026 : l'IRD met puissance, débit symbole et
+    # fréquence à 0, la modulation à « automatic unknown unknown », et garde les dernières valeurs du décodeur.
+    UNLOCKED = (DECODE.replace(b"<locked>true</locked>", b"<locked>false</locked>", 1)
+                .replace(b"<snr>152</snr>", b"<snr>0</snr>").replace(b"<snrMargin>73</snrMargin>", b"<snrMargin>0</snrMargin>")
+                .replace(b"<power>-41</power>", b"<power>0</power>").replace(b"<frequency>1983022</frequency>", b"<frequency>0</frequency>")
+                .replace(b"<symbolRate>7200000</symbolRate>", b"<symbolRate>0</symbolRate>")
+                .replace(b"<modulation>8psk</modulation>", b"<modulation>unknown</modulation>")
+                .replace(b"<fec>3_4</fec>", b"<fec>unknown</fec>").replace(b"<mode>dvbs2</mode>", b"<mode>automatic</mode>")
+                .replace(b"<rollOff>0_25</rollOff>", b"<rollOff>0_35</rollOff>")
+                .replace(b"<tsLocked>true</tsLocked>", b"<tsLocked>false</tsLocked>")
+                .replace(b"<bitrate>15677</bitrate>", b"<bitrate>0</bitrate>", 1))
+
+    def test_unlocked_has_no_reception_values(self):
+        # 0 dBm, 0 MS/s et « automatic unknown unknown » ne sont pas des mesures : rien plutôt que des valeurs fausses.
+        s = parse_refresh(self.UNLOCKED)
+        self.assertIs(s.locked, False)
+        self.assertIsNone(s.power_dbm)
+        self.assertIsNone(s.symbol_rate)
+        self.assertIsNone(s.modcod)
+        self.assertIsNone(s.roll_off)
+        self.assertEqual((s.margin_db, s.cn_db), (0.0, 0.0))  # 0 dB = décrochage, voulu
+
+    def test_unlocked_has_no_stale_decoding(self):
+        # Sans flux transport, voies audio « actives » et débits vidéo sont ceux d'avant la coupure.
+        s = parse_refresh(self.UNLOCKED)
+        self.assertEqual((s.audio_active, s.audio_bitrate, s.video_bitrate), (None, None, None))
+        self.assertEqual(s.audio_configured, 5)
+        d = s.details
+        self.assertEqual((d.video_codec, d.video_pid, d.audio), (None, None, ()))
+        self.assertEqual(d.sdi_formats, ("hd_1920x1080i_50", "hd_1920x1080i_50"))  # configuration des sorties gardée
+        self.assertEqual(band_state(s), 3)
+
     def test_details_absent_on_old_fixture(self):
         self.assertIsNone(parse_refresh(FIXTURE).details)
 

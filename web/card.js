@@ -176,12 +176,14 @@ const Card = (() => {
     const limits = [thr > 0 ? `chute si < ${fmt(thr, 1, "dB")}` : "", minimum > 0 ? `min. ${fmt(minimum, 1, "dB")}` : ""]
       .filter(Boolean).join(" · ");
     const voices = m?.audio_configured;
+    const decoding = live && m.locked && m.ts_locked;  // sans flux transport, l'IRD garde ses dernières valeurs de décodage
     setRows(h.values, [
       ["Marge", live ? fmt(m.margin_db, 1, "dB") : "—", (live && limits) || "réserve avant décrochage"],
       ["Signal reçu", live && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—", "puissance d'entrée"],
       ["Image", !live || !m.locked ? "—" : m.video_active === false ? "aucune" : imageFormat(m.video_format, true) || "—", "",
         live && m.video_active === false ? "violet" : ""],
-      ["Son", live && voices ? `${m.audio_active ?? "?"} voie${voices > 1 ? "s" : ""} sur ${voices}` : "—", live && voices ? "actives" : ""],
+      ["Son", decoding && voices && m.audio_active != null ? `${m.audio_active} voie${voices > 1 ? "s" : ""} sur ${voices}` : "—",
+        decoding && voices ? "actives" : ""],
       [compact ? "Temp." : "Température", live && m.health?.fpga_temp != null ? `${Math.round(m.health.fpga_temp)} °C` : "—", "FPGA"],
     ]);
     h.chart.hidden = false;

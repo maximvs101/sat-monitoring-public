@@ -8,7 +8,7 @@
 const CarrierPage = (() => {
   const CODECS = { h264: "H.264", hevc: "HEVC", h265: "HEVC", mpeg2: "MPEG-2", mpa: "MPEG audio", ac3: "Dolby Digital",
     eac3: "Dolby Digital Plus", aac: "AAC", heaac: "HE-AAC", pcm: "PCM", dolbye: "Dolby E" };
-  const PATTERNS = { blue: "mire bleue", black: "image noire" };
+  const PATTERNS = { blue: "mire bleue", black: "image noire", red: "mire rouge" };
   const codec = (c) => CODECS[c] || c || "?";
 
   let route = null;

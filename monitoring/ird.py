@@ -147,12 +147,12 @@ def _num(el, path, conv, scale=1):
         return None
 
 
-def _parse_details(root, prog) -> IrdDetails | None:
+def _parse_details(root, prog, decoding=True) -> IrdDetails | None:
     out = root.find("presets/v1[@id='0']/channel/output")
     if prog is None and out is None:
         return None
     d = {}
-    if prog is not None:
+    if prog is not None and decoding:
         dec = prog.find("video/decoded")
         if dec is not None:
             num, den = _num(dec, "fpsNum", int), _num(dec, "fpsDen", int)
@@ -165,6 +165,7 @@ def _parse_details(root, prog) -> IrdDetails | None:
                        _num(a, "status/decoded/numChannels", int), _num(a, "status/decoded/sampleRate", int),
                        _num(a, "status/decoded/bitrate", int), _bool(a, "status/hasActivity"))
             for a in _configured_voices(prog))
+    if prog is not None:
         d["sdi_formats"] = tuple(f for f in (_text(prog, "video/conn12Format"), _text(prog, "video/conn3Format")) if f)
     if out is not None:
         streams = out.findall("forward/ip/streams")
@@ -201,12 +202,15 @@ def parse_refresh(data: bytes) -> IrdSample:
     if inp is None:
         raise IrdError("bloc probe/input absent")
 
+    # Déverrouillé, l'IRD met puissance, débit symbole et IF à 0 et la modulation à « automatic unknown unknown » :
+    # ce ne sont pas des mesures. C/N et marge à 0 restent (0 dB = décrochage, voulu sur les graphes).
+    locked = _text(inp, "sat/locked") == "true"
+    ts_locked = _text(inp, "tsLocked") == "true"
     parts = [_text(inp, "sat/mode"), _text(inp, "sat/modulation"), _text(inp, "sat/fec")]
-    modcod = " ".join(parts).replace("_", "/") if all(parts) else None
+    modcod = " ".join(parts).replace("_", "/") if locked and all(parts) and "unknown" not in parts else None
 
     # Fréquence RF : IF mesurée + oscillateur du LNB quand l'IRD est verrouillé ; sinon la fréquence
     # configurée (l'IF tombe à 0 pendant un décrochage).
-    locked = _text(inp, "sat/locked") == "true"
     if_khz = _num(inp, "sat/frequency", int)
     lo_khz = _num(root, f"{ACTIVE_SAT}/oscillatorFrequency", int)
     downlink_khz = _num(root, f"{ACTIVE_SAT}/downlinkFrequency", int)
@@ -215,36 +219,40 @@ def parse_refresh(data: bytes) -> IrdSample:
     else:
         rf_khz = downlink_khz or None
         rf_measured = False if rf_khz else None
-    roll_off_raw = _text(inp, "sat/rollOff")
+    roll_off_raw = _text(inp, "sat/rollOff") if locked else None
     try:
         roll_off = float(roll_off_raw.replace("_", ".")) if roll_off_raw else None
     except ValueError:
         roll_off = None
 
-    # Décodage : image, son (voies configurées / actives), déchiffrement, programme sélectionné.
+    # Décodage : image, son (voies configurées / actives), déchiffrement, programme sélectionné. Sans flux transport,
+    # le décodeur garde ses dernières valeurs (voies « actives », débit vidéo) : elles ne sont pas reprises.
     prog = root.find("probe/decode/currentProgram")
     video = {}
     audio_configured = audio_active = audio_bitrate = None
     if prog is not None:
-        video = dict(video_active=_bool(prog, "video/hasActivity"), video_bitrate=_num(prog, "video/decoded/bitrate", int),
+        video = dict(video_active=_bool(prog, "video/hasActivity"),
+                     video_bitrate=_num(prog, "video/decoded/bitrate", int) if ts_locked else None,
                      video_format=_text(prog, "video/mainFormat"))
         voices = _configured_voices(prog)
         if prog.find("audio") is not None:
-            active = [a for a in voices if _text(a, "status/hasActivity") == "true"]
-            audio_configured, audio_active = len(voices), len(active)
-            audio_bitrate = _num(active[0], "status/decoded/bitrate", int) if active else None
+            audio_configured = len(voices)
+            if ts_locked:
+                active = [a for a in voices if _text(a, "status/hasActivity") == "true"]
+                audio_active = len(active)
+                audio_bitrate = _num(active[0], "status/decoded/bitrate", int) if active else None
     selected = next((p for p in root.findall("probe/tsDescriptor/program") if _text(p, "selected") == "true"), None)
 
     return IrdSample(
         locked=locked,
-        ts_locked=_text(inp, "tsLocked") == "true",
+        ts_locked=ts_locked,
         cn_db=_num(inp, "sat/snr", float, 10),
         margin_db=_num(inp, "sat/snrMargin", float, 10),
         ber=_num(inp, "sat/ber", float, BER_SCALE),
         ber_raw=_text(inp, "sat/ber"),
-        power_dbm=_num(inp, "sat/power", float),
-        if_khz=if_khz,
-        symbol_rate=_num(inp, "sat/symbolRate", int),
+        power_dbm=_num(inp, "sat/power", float) if locked else None,
+        if_khz=if_khz if locked else None,
+        symbol_rate=(_num(inp, "sat/symbolRate", int) or None) if locked else None,
         modcod=modcod,
         bitrate_kbps=_num(inp, "bitrate", int),
         rf_khz=rf_khz,
@@ -262,7 +270,7 @@ def parse_refresh(data: bytes) -> IrdSample:
         descrambled=_bool(prog, "descrambled") if prog is not None else None,
         program_number=_num(selected, "programNumber", int) if selected is not None else None,
         service_name=_text(selected, "serviceName") if selected is not None else None,
-        details=_parse_details(root, prog),
+        details=_parse_details(root, prog, decoding=ts_locked),
     )
 
 

@@ -364,8 +364,12 @@ class App:
         if health is not None:
             self.store.add_health(ts, serial, health)
         if s.rf_khz:
-            self.tunings[serial] = Tuning(s.rf_khz, s.polarization, s.symbol_rate, s.roll_off,
-                                          measured=s.rf_measured is not False)
+            sr, roll_off = s.symbol_rate, s.roll_off
+            prev = self.tunings.get(serial)
+            # Décrochage sur la même porteuse (à moins d'un demi-débit symbole) : débit symbole et roll-off du dernier lock.
+            if not s.locked and prev and prev.symbol_rate and abs(s.rf_khz - prev.rf_khz) * 2000 < prev.symbol_rate:
+                sr, roll_off = sr or prev.symbol_rate, roll_off if roll_off is not None else prev.roll_off
+            self.tunings[serial] = Tuning(s.rf_khz, s.polarization, sr, roll_off, measured=s.rf_measured is not False)
         name = self.names.get(serial, serial)
         carriers = self.carriers()
         with self._detect_lock:
