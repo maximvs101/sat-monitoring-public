@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un autre FSH4, 192.168.10.99 (injoignable au 24/10) (n° 100001, firmware V2.50), qui n'a pas l'option FSH-K40 : aucune mesure possible (voir le guide). L'ancien FSH4 (192.168.10.224, V1.20) n'en avait pas besoin. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.0.2** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.2, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
+- Windows : versions publiées sur le dépôt public, dernière **v1.1.0** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
 ## À faire
 
@@ -26,6 +26,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Version v1.1.0** publiée sur le dépôt public (lots 1 et 2) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0 avec `MonitoringSat-Windows.zip` (10,5 Mo) et notes en français.
 - **Lot 2 de corrections** (tous les autres points des revues, et les mineurs reportés depuis le 22/10) :
   - alertes : référence de chute figée une minute après une alerte (pas deux) ; « IRD seul en défaut » qui devient critique si l'IRD perd ensuite le lock ; pas de « réglage FSH4 modifié » à tort après un changement de FSH4 ; deux porteuses très proches n'ont plus la même clé (« 125830.9-V ») ; liste de porteuses ancienne jamais publiée après une plus récente ; IRD injoignable : lock, BER, marge et journal fermés (« IRD injoignable »), rouverts au retour si besoin ; FSH4 en pause : son « injoignable » fermé ; détail « FSH4 — … » au lieu de « fsh » ; flux d'entrée arrêté : une seule alerte (la cause), plus d'« image perdue » en plus ; heure du système qui recule : délais recalés ; marqueur imposé comme bruit retiré de sa porteuse ; BER à la française (« 1,0e-04 ») ;
   - collecte : fréquence d'un marqueur lue juste après son contrôle ; pause et reprise, changement d'appareil sans course ; lecture de la file d'erreurs du FSH4 courte (0,5 s) ; voie audio à identifiant non numérique tolérée ; « réponse trop lente » au lieu d'« injoignable » ; entrée en bande L directe mesurée ; durée du traitement comptée dans la cadence ;
