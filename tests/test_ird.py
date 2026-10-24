@@ -134,6 +134,30 @@ class ClientTest(unittest.TestCase):
                 mock.patch("urllib.request.proxy_bypass", lambda host: False):
             self.assertIsInstance(IrdClient(srv.host, IrdConfig()).fetch(), IrdSample)
 
+    def test_slow_body_is_not_unreachable(self):
+        # L'IRD répond (en-têtes) puis traîne sur le contenu : il n'est pas « injoignable », il est trop lent.
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                self.rfile.read(int(self.headers.get("Content-Length", 0)))
+                self.send_response(200)
+                self.send_header("Content-Length", "100000")
+                self.end_headers()
+                self.wfile.write(b"<response")
+                self.wfile.flush()
+                time.sleep(1.5)
+
+            def log_message(self, *a):
+                pass
+
+        httpd = HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        self.addCleanup(httpd.server_close)
+        self.addCleanup(httpd.shutdown)
+        with self.assertRaises(IrdError) as ctx:
+            IrdClient(f"127.0.0.1:{httpd.server_port}", IrdConfig(timeout_s=0.5)).fetch()
+        self.assertNotIn("injoignable", str(ctx.exception))
+        self.assertIn("trop lente", str(ctx.exception))
+
     def test_fetch_timeout_raises(self):
         srv = FakeIrd(delay_s=0.5)
         self.addCleanup(srv.stop)
@@ -170,6 +194,13 @@ class TuningTest(unittest.TestCase):
         self.assertEqual(parse_refresh(data).rf_khz, 12583060)
         self.assertIs(parse_refresh(data).rf_measured, False)
         self.assertIs(parse_refresh(PRESETS).rf_measured, True)
+
+    def test_direct_l_band_input_is_measured(self):
+        # Entrée en bande L directe (pas de LNB, oscillateur à 0) et IRD verrouillé : la fréquence est mesurée.
+        import re
+        data = re.sub(rb"<oscillatorFrequency>\d+</oscillatorFrequency>", b"<oscillatorFrequency>0</oscillatorFrequency>", PRESETS)
+        s = parse_refresh(data)
+        self.assertEqual((s.rf_khz, s.rf_measured), (s.if_khz, True))
 
     def test_old_fixture_has_no_rf(self):
         s = parse_refresh(FIXTURE)
@@ -237,6 +268,12 @@ class DecodeTest(unittest.TestCase):
         self.assertEqual((d.video_codec, d.video_pid, d.audio), (None, None, ()))
         self.assertEqual(d.sdi_formats, ("hd_1920x1080i_50", "hd_1920x1080i_50"))  # configuration des sorties gardée
         self.assertEqual(band_state(s), 3)
+
+    def test_odd_audio_voice_id_does_not_fail_the_reading(self):
+        # Autre firmware : un identifiant de voie non numérique ne doit pas rendre l'IRD « injoignable ».
+        data = DECODE.replace(b'<audio id="0">', b'<audio id="main">', 1)
+        d = parse_refresh(data).details
+        self.assertEqual(d.audio[0].slot, -1)
 
     def test_details_absent_on_old_fixture(self):
         self.assertIsNone(parse_refresh(FIXTURE).details)

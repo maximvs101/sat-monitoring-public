@@ -58,7 +58,7 @@ const SettingsPage = (() => {
     const err = dom.fshErr ??= errorBox();  // gardée d'un rafraîchissement à l'autre
     if (!dom.fshDirty || !dom.fshForm) dom.fshForm = fshForm(fsh, err);
     const paused = Store.state.states.fsh === "paused";
-    const pause = button(paused ? "Reprendre les mesures" : "Mettre en pause", () => toggleFshPause((m) => showError(err, m)), { small: true });
+    const pause = button(paused ? "Reprendre" : "Pause", () => toggleFshPause((m) => showError(err, m)), { small: true });
     const [label, tone] = DEVICE_STATE[Store.state.states.fsh] || DEVICE_STATE.unknown;
     const seen = Store.state.seen.fsh ? ` · dernière mesure ${fmtDateTime(Store.state.seen.fsh)}` : "";
     return cardBox(el("div", { className: "card-title" }, el("span", {}, "FSH4 ", el("span", { className: `badge ${tone}`, textContent: label }),
@@ -177,10 +177,20 @@ const SettingsPage = (() => {
     const fsh = fshCard(d.fsh);
     dom.fshCard.replaceWith(fsh);
     dom.fshCard = fsh;
+    const old = dom.irdsCard.querySelector("tbody");
+    // Saisie en cours dans le tableau (Tab vers le champ suivant après une modification) : le tableau sera
+    // redessiné quand le curseur l'aura quitté, pas sous les doigts.
+    if (old.contains(document.activeElement) && document.activeElement.matches("input, select")) {
+      if (!old.dataset.deferred) {
+        old.dataset.deferred = "1";
+        old.addEventListener("focusout", (e) => { if (!old.contains(e.relatedTarget)) refresh(); }, { once: true });
+      }
+      return;
+    }
     const err = dom.irdsCard.querySelector(".error");
     const body = el("tbody", {}, ...d.irds.map((ird) => irdRow(ird, err)));
     if (!d.irds.length) body.append(el("tr", {}, el("td", { colSpan: 6, className: "muted", textContent: "Aucun IRD suivi." })));
-    dom.irdsCard.querySelector("tbody").replaceWith(body);
+    old.replaceWith(body);
   }
 
   // ----- Porteuses -----
@@ -199,7 +209,7 @@ const SettingsPage = (() => {
         el("td", { className: "num", textContent: c.symbol_rate ? `${num(c.symbol_rate / 1e6, 2)} MS/s` : "—" }),
         el("td", { className: "num", textContent: String(c.irds.length) }), el("td", { textContent: c.manual ? "saisie" : "IRD" }), el("td", {}, remove));
     });
-    if (!rows.length) rows.push(el("tr", {}, el("td", { colSpan: 7, className: "muted", textContent: "Aucune porteuse : ajoute un IRD ou une porteuse." })));
+    if (!rows.length) rows.push(el("tr", {}, el("td", { colSpan: 7, className: "muted", textContent: "Aucune porteuse : ajouter un IRD ou une porteuse." })));
     const table = el("table", { className: "table" },
       el("thead", {}, el("tr", {}, ...["Nom", "Fréquence", "Polarisation", "Débit symbole", "IRD", "Origine", ""].map((h) => el("th", { textContent: h })))),
       el("tbody", {}, ...rows));

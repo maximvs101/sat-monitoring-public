@@ -9,6 +9,7 @@ from .config import FshConfig
 
 
 MARKER_NUMBERS = range(1, 7)
+ERROR_CHECK_TIMEOUT_S = 0.5  # lecture de la file d'erreurs après une requête sans réponse
 
 
 class FshError(Exception):
@@ -85,6 +86,7 @@ class FshClient:
         """Après une requête restée sans réponse : la file d'erreurs dit-elle « Undefined header » (-113) ?
         C'est le cas d'un FSH4 sans l'option FSH-K40 (firmware V1.30 et plus). Lecture seule."""
         try:
+            self._sock.settimeout(min(ERROR_CHECK_TIMEOUT_S, self.cfg.timeout_s))  # l'échec ne dure pas deux fois plus
             self._sock.sendall(b"SYST:ERR?\n")
             answer = self._sock.recv(4096).decode(errors="replace")
         except OSError:
@@ -102,8 +104,13 @@ class FshClient:
     def read_settings(self) -> FshSettings:
         """Span, RBW, et fréquence des marqueurs allumés (un marqueur éteint répond quand même : on l'ignore)."""
         span, rbw = self._float("FREQ:SPAN?"), self._float("BAND?")
-        active = [n for n in MARKER_NUMBERS if self.marker_on(n)]
-        return FshSettings(span, rbw, tuple((n, self._float(f"CALC:MARK{n}:X?")) for n in active))
+        # Fréquence lue juste après le contrôle de chaque marqueur : le délai pendant lequel l'opérateur pourrait
+        # l'éteindre (et :X? le rallumer, V1.20) se réduit à un aller-retour.
+        markers = []
+        for n in MARKER_NUMBERS:
+            if self.marker_on(n):
+                markers.append((n, self._float(f"CALC:MARK{n}:X?")))
+        return FshSettings(span, rbw, tuple(markers))
 
     def marker_on(self, n: int) -> bool:
         """Demander l'état ne rallume pas le marqueur (contrairement à :X? et :Y?)."""

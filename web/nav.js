@@ -24,13 +24,15 @@ const Nav = (() => {
     if (next === sig) return;
     sig = next;
     const is = (page, extra = {}) => route.page === page && Object.entries(extra).every(([k, v]) => route[k] === v);
+    // Porteuse ouverte par une clé devenue autre (polarisation connue entre-temps…) : celle que la page affiche.
+    const shown = route.page === "carrier" ? matchCarrier(s.carriers, { key: route.key }) : null;
     root.replaceChildren(
       el("div", { className: "nav-brand", textContent: "Monitoring satellite" }),
       el("div", { className: `nav-live${s.connected ? "" : " off"}`, textContent: s.connected ? "● en direct" : "● connexion perdue" }),
       item("Vue d'ensemble", routeHref({ page: "overview" }), { active: is("overview"), count: total }),
       el("div", { className: "nav-group", textContent: "Porteuses" }),
       ...(carriers.length ? carriers.map(([key, name, count]) =>
-        item(name, routeHref({ page: "carrier", key }), { sub: true, active: is("carrier", { key }), count }))
+        item(name, routeHref({ page: "carrier", key }), { sub: true, active: shown?.key === key, count }))
         : [el("div", { className: "nav-item sub muted", textContent: "aucune" })]),
       el("div", { className: "nav-sep" }),
       item("Journal des événements", routeHref({ page: "journal" }), { active: is("journal") }),

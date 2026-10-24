@@ -8,7 +8,7 @@ from dataclasses import asdict, replace
 from pathlib import Path
 
 from . import discover, system
-from .carriers import Carrier, Tuning, attach_markers, center_marker, entry_matches, group_carriers
+from .carriers import Carrier, Tuning, attach_markers, center_marker, compatible_pol, entry_matches, group_carriers
 from .collector import DeviceLoop
 from .config import CarrierEntry, Config, IrdEntry, save_carriers, save_detect, save_fsh, save_irds
 from .detect import Detector
@@ -136,6 +136,7 @@ class App:
         self.ird_loops = {}   # numéro de série → DeviceLoop
         self.pending = []     # IRD de config.toml pas encore identifiés (ancien format)
         self._carriers_sig = None
+        self._carriers_lock = threading.RLock()  # calcul et publication des porteuses (plusieurs fils d'IRD)
         self._last_carriers = []  # pour garder les clés de porteuse stables d'un calcul à l'autre
         for entry in cfg.irds:
             if entry.serial:
@@ -166,10 +167,12 @@ class App:
         return tuple(IrdEntry(s, self.names[s], self.hosts[s], self.pols.get(s))
                      for s in self.ird_loops) + tuple(self.pending)
 
-    def _save_irds(self) -> None:
-        self.cfg = replace(self.cfg, irds=self._entries())
+    def _save_irds(self, entries: tuple | None = None) -> None:
+        """Enregistre d'abord : si config.toml ne peut pas être écrit, la mémoire ne change pas."""
+        entries = self._entries() if entries is None else tuple(entries)
         if self.config_path is not None:
-            save_irds(self.config_path, self.cfg.irds)
+            save_irds(self.config_path, entries)
+        self.cfg = replace(self.cfg, irds=entries)
 
     def identify_pending(self) -> None:
         """Identifie les IRD de l'ancien format (sans numéro de série) ; ceux qui échouent restent en attente."""
@@ -202,8 +205,8 @@ class App:
             if serial in self.ird_loops:
                 raise ValueError(f"cet IRD (n° {serial}) est déjà suivi")
             entry = IrdEntry(serial, name or "IRD", host)
+            self._save_irds((*self._entries(), entry))  # suivi seulement une fois enregistré
             self._register(entry)
-            self._save_irds()
         log.info("IRD ajouté : %s (n° %s, %s)", entry.name, serial, host)
         return entry
 
@@ -251,16 +254,17 @@ class App:
     def carriers(self) -> list:
         # Dans l'ordre de config.toml, pour que l'ordre des IRD d'une porteuse ne dépende pas de qui a répondu en premier.
         # Copies : un IRD peut être ajouté ou retiré par un autre fil pendant le calcul.
-        current, loops = dict(self.tunings), list(self.ird_loops)
-        tunings = {s: current[s] for s in loops if s in current}
-        carriers = group_carriers(tunings, self.cfg.carriers, previous=self._last_carriers)
-        self._last_carriers = carriers
-        return carriers
+        with self._carriers_lock:
+            current, loops = dict(self.tunings), list(self.ird_loops)
+            tunings = {s: current[s] for s in loops if s in current}
+            carriers = group_carriers(tunings, self.cfg.carriers, previous=self._last_carriers)
+            self._last_carriers = carriers
+            return carriers
 
     def _save_carriers(self, entries: tuple) -> None:
-        self.cfg = replace(self.cfg, carriers=tuple(entries))
         if self.config_path is not None:
-            save_carriers(self.config_path, self.cfg.carriers)
+            save_carriers(self.config_path, tuple(entries))
+        self.cfg = replace(self.cfg, carriers=tuple(entries))
 
     def _carrier(self, key: str) -> Carrier:
         c = next((c for c in self.carriers() if c.key == key), None)
@@ -282,6 +286,12 @@ class App:
 
     def add_carrier(self, entry: CarrierEntry) -> None:
         with self._devices_lock:
+            for e in self.cfg.carriers:
+                rates = [r * 1e6 for r in (e.symbol_rate_msps, entry.symbol_rate_msps) if r]
+                tolerance_mhz = min(rates) / 2 / 1e6 if rates else 1.0
+                if e.manual and compatible_pol(e.polarization, entry.polarization) \
+                        and abs(e.freq_mhz - entry.freq_mhz) < tolerance_mhz:
+                    raise ValueError(f"une porteuse saisie existe déjà à cette fréquence : {e.name}")
             self._save_carriers((*self.cfg.carriers, replace(entry, manual=True)))
         self._publish_carriers_if_changed(self.carriers())
 
@@ -294,13 +304,19 @@ class App:
         self._publish_carriers_if_changed(self.carriers())
 
     def _publish_carriers_if_changed(self, carriers: list) -> None:
-        sig = tuple((c.key, c.name, c.irds, c.manual) for c in carriers)
-        if sig != self._carriers_sig:
+        with self._carriers_lock:
+            # Un autre fil a calculé une liste plus récente : c'est elle qui sera publiée (la nôtre fermerait à tort
+            # les alertes de ses nouvelles porteuses).
+            if carriers is not self._last_carriers:
+                return
+            sig = tuple((c.key, c.name, c.irds, c.manual) for c in carriers)
+            if sig == self._carriers_sig:
+                return
             self._carriers_sig = sig
             with self._detect_lock:
                 events = self.detector.prune_carriers(_now_ms(), {c.key for c in carriers})
             self.bus.publish({"type": "carriers", "carriers": [carrier_dict(c) for c in carriers]})
-            self._publish_events(events)
+        self._publish_events(events)
 
     # --- FSH4 ---
 
@@ -323,9 +339,11 @@ class App:
             self.cfg = replace(self.cfg, fsh=replace(self.cfg.fsh, host=host, port=port, polarization=polarization))
             fsh_read, fsh_close = default_fsh(self.cfg)
             with self._detect_lock:
+                # Le changement est d'abord demandé : une lecture de l'ancien appareil qui se termine ensuite est
+                # reconnue (replacement_pending) et ignorée par la détection.
+                self.fsh_loop.replace_reader(fsh_read, fsh_close)
                 events = self.detector.on_devices_changed(_now_ms(), f"FSH4 {host}:{port}")
                 self._fsh_key = None
-            self.fsh_loop.replace_reader(fsh_read, fsh_close)
         log.info("FSH4 : %s:%d, entrée %s", host, port, polarization or "polarisation inconnue")
         self._publish_events(events)
 
@@ -390,14 +408,15 @@ class App:
         self._publish_carriers_if_changed(carriers)
 
     def _on_marker(self, ts, reading):
-        for n, m in reading.markers.items():
-            self.store.add_marker(ts, m, n)
+        self.store.add_markers(ts, reading.markers)
         freqs = {n: m.freq_hz for n, m in reading.markers.items()}
         carriers = self.carriers()
         mm = attach_markers(carriers, freqs, self.cfg.fsh.polarization, self.cfg.detect.noise_markers)
         self.marker_freqs, self.marker_map = freqs, mm
         events = []
         with self._detect_lock:
+            if self.fsh_loop.replacement_pending():
+                return  # lecture de l'ancien FSH4, arrivée après le changement d'appareil
             if reading.settings is not None:
                 key = reading.settings
                 if self._fsh_key is not None and key != self._fsh_key:

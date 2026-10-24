@@ -31,6 +31,16 @@ class GroupTest(unittest.TestCase):
         self.assertEqual(c.name, "12 583,0 V")
         self.assertFalse(c.manual)
 
+    def test_close_carriers_never_share_a_key(self):
+        # Deux porteuses à faible débit symbole, à moins de 100 kHz l'une de l'autre : deux porteuses, deux clés.
+        carriers = group_carriers({"A": tuning(12_583_010, sr=100_000), "B": tuning(12_583_090, sr=100_000)}, ())
+        self.assertEqual(len(carriers), 2)
+        self.assertEqual(len({c.key for c in carriers}), 2)
+        # Clé gardée d'un calcul précédent par l'une, clé fraîche identique pour l'autre.
+        again = group_carriers({"A": tuning(12_583_010, sr=100_000), "B": tuning(12_583_090, sr=100_000)}, (), carriers)
+        self.assertEqual(len({c.key for c in again}), 2)
+        self.assertEqual({c.key for c in again}, {c.key for c in carriers})
+
     def test_far_irds_two_carriers(self):
         carriers = group_carriers({"A": tuning(12_583_023), "B": tuning(12_590_000)}, ())
         self.assertEqual(len(carriers), 2)
@@ -122,6 +132,13 @@ class MarkerTest(unittest.TestCase):
     def test_unknown_fsh_pol_attaches(self):
         mm = attach_markers(group_carriers(BBC, ()), MARKERS, None)
         self.assertEqual(list(mm.by_carrier.values()), [(1, 2)])
+
+    def test_forced_noise_marker_leaves_its_carrier(self):
+        # Marqueur imposé comme bruit alors qu'il tombe dans la bande d'une porteuse : il ne compte que pour le bruit.
+        carriers = group_carriers(BBC, ())
+        mm = attach_markers(carriers, MARKERS, V, noise_markers=(2, 4))
+        self.assertEqual(mm.noise, (2, 4))
+        self.assertEqual(mm.by_carrier[carriers[0].key], (1,))
 
     def test_noise_markers_override(self):
         mm = attach_markers(group_carriers(BBC, ()), MARKERS, V, noise_markers=(5,))

@@ -1,7 +1,9 @@
 """Chargement de config.toml en dataclasses gelées."""
 
 import json
+import os
 import re
+import time
 import tomllib
 from urllib.parse import urlsplit
 from dataclasses import dataclass, field, fields
@@ -100,8 +102,46 @@ def _check(cls, where, values):
         raise ValueError(f"polarisation inconnue dans {where} : {values['polarization']!r}")
 
 
+# Valeurs qui doivent être strictement positives (0 bloquerait la collecte ou diviserait par zéro).
+POSITIVE = {"port", "rate_hz", "timeout_s", "retry_s", "down_after_failures", "live_window_min", "max_points",
+            "median_window_s", "ber_threshold", "margin_drop_db", "marker_drop_db", "noise_rise_db"}
+FREQ_RANGE_MHZ = (950.0, 40_000.0)  # de la bande L directe à la bande Ka
+WRITE_ATTEMPTS = 3
+
+
+def _check_types(cls, where, values):
+    """Types et bornes, avec un message en clair (au lieu d'une erreur Python au démarrage)."""
+    for f in fields(cls):
+        if f.name not in values:
+            continue
+        v, default = values[f.name], f.default
+        if isinstance(default, bool) or default is None:
+            continue
+        if isinstance(default, (int, float)):
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or (isinstance(default, int) and isinstance(v, float)
+                                                                            and not v.is_integer()):
+                raise ValueError(f"{where} {f.name} : nombre attendu, pas {v!r}")
+            if v < 0 or (f.name in POSITIVE and v <= 0):
+                raise ValueError(f"{where} {f.name} : valeur {'positive' if f.name in POSITIVE else 'positive ou nulle'} attendue, pas {v!r}")
+            if f.name == "port" and v > 65535:
+                raise ValueError(f"{where} port : entre 1 et 65535, pas {v!r}")
+        elif isinstance(default, str) and not isinstance(v, str):
+            raise ValueError(f"{where} {f.name} : texte entre guillemets attendu, pas {v!r}")
+
+
+def check_freq_mhz(value, where="fréquence") -> float:
+    """Fréquence satellite en MHz, de la bande L à la bande Ka."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{where} : nombre de MHz attendu, pas {value!r}")
+    lo, hi = FREQ_RANGE_MHZ
+    if not lo <= value <= hi:
+        raise ValueError(f"{where} : entre {lo:g} et {hi:g} MHz, pas {value:g}")
+    return float(value)
+
+
 def _section(cls, name, values):
     _check(cls, f"[{name}]", values)
+    _check_types(cls, f"[{name}]", values)
     values = {k: tuple(v) if isinstance(v, list) else v for k, v in values.items()}
     if "noise_markers" in values:
         nm = values["noise_markers"]
@@ -140,15 +180,25 @@ def load_config(path: str | Path) -> Config:
                  for v in _entries(IrdEntry, "irds", data.get("irds", [])))
     if not irds and legacy_url:
         irds = (IrdEntry("", "IRD", urlsplit(legacy_url).hostname or ""),)
-    carriers = tuple(CarrierEntry(name=v["name"] or "", freq_mhz=float(v["freq_mhz"]), polarization=v["polarization"],
-                                  symbol_rate_msps=v["symbol_rate_msps"], manual=bool(v["manual"]))
+    carriers = tuple(CarrierEntry(name=v["name"] or "", freq_mhz=check_freq_mhz(v["freq_mhz"], "[[carriers]] freq_mhz"),
+                                  polarization=v["polarization"], symbol_rate_msps=_rate(v["symbol_rate_msps"]),
+                                  manual=bool(v["manual"]))
                      for v in _entries(CarrierEntry, "carriers", data.get("carriers", [])))
     return Config(**sections, irds=irds, carriers=carriers)
 
 
+def _rate(value):
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+        raise ValueError(f"[[carriers]] symbol_rate_msps : nombre positif de MS/s attendu, pas {value!r}")
+    return float(value)
+
+
 def _header(line: str) -> str:
-    """En-tête de section sans son éventuel commentaire."""
-    return line.split("#", 1)[0].strip()
+    """En-tête de section sans son éventuel commentaire, espaces intérieurs retirés (« [ fsh ] » = « [fsh] »)."""
+    h = line.split("#", 1)[0].strip()
+    return re.sub(r"^(\[{1,2})\s*(.*?)\s*(\]{1,2})$", r"\1\2\3", h)
 
 
 def _section_bounds(lines: list, section: str):
@@ -191,13 +241,20 @@ def _remove_key(text: str, section: str, key: str) -> str:
 
 def _replace_blocks(text: str, name: str, blocks: list[str]) -> str:
     """Retire tous les blocs [[name]] et ajoute les nouveaux en fin de fichier."""
-    out, skipping = [], False
+    out, skipping, held = [], False, []
     for line in text.splitlines(keepends=True):
         header = _header(line)
         if header.startswith("["):
+            if skipping:
+                out += held  # commentaires et lignes vides juste avant l'en-tête suivant : ils sont à lui
+            held = []
             skipping = header == f"[[{name}]]"
         if not skipping:
             out.append(line)
+        elif not header or line.lstrip().startswith("#"):
+            held.append(line)
+        else:
+            held = []
     text = "".join(out).rstrip("\n") + "\n"
     return text + "".join(f"\n[[{name}]]\n{b}" for b in blocks)
 
@@ -216,9 +273,21 @@ def _block(pairs: dict) -> str:
 
 
 def _write(path: Path, text: str) -> None:
+    """Écriture sûre : fichier temporaire écrit jusqu'au disque, puis remplacement (retenté si Windows le refuse un
+    instant, antivirus ou indexeur) ; une coupure de courant ne laisse jamais un config.toml vide."""
     tmp = path.with_suffix(".tmp")
-    tmp.write_text(text, encoding="utf-8")
-    tmp.replace(path)
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    for attempt in range(WRITE_ATTEMPTS):
+        try:
+            tmp.replace(path)
+            return
+        except PermissionError:
+            if attempt == WRITE_ATTEMPTS - 1:
+                raise
+            time.sleep(0.2)
 
 
 def save_fsh(path: str | Path, host: str, port: int, polarization: str | None) -> None:

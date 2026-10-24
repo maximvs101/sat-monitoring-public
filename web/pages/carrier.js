@@ -71,7 +71,7 @@ const CarrierPage = (() => {
 
   // Événements de la porteuse (ses IRD pendant leur appartenance, ses marqueurs) sur la période.
   function carrierEvents() {
-    const all = live() ? Store.liveEvents() : [...data.events].sort((a, b) => (a.ts_end == null) - (b.ts_end == null) || b.ts_start - a.ts_start);
+    const all = live() ? Store.liveEvents() : [...data.events].sort((a, b) => (b.ts_end == null) - (a.ts_end == null) || b.ts_start - a.ts_start);
     return all.filter((e) => e.source === `porteuse:${carrier.key}`
       || (e.source?.startsWith("ird:") && carrier.irds.includes(e.source.slice(4)) && Charts.inPeriods(carrier, e.source.slice(4), e.ts_start)));
   }
@@ -183,9 +183,10 @@ const CarrierPage = (() => {
         const details = el("dl", { className: "ird-details" });
         sec = { el: el("div", { className: "ird-section" }, card.el, details), card, details };
         sec.el.dataset.serial = serial;
-        sec.el.style.setProperty("--ird-color", IRD_COLORS[i % IRD_COLORS.length]);
         sections.set(serial, sec);
       }
+      // Couleur de sa courbe : suit la position de l'IRD dans la porteuse (un autre IRD a pu la quitter).
+      sec.el.style.setProperty("--ird-color", IRD_COLORS[i % IRD_COLORS.length]);
       if (dom.irds.children[i] !== sec.el) dom.irds.insertBefore(sec.el, dom.irds.children[i] || null);
       if (live()) {
         const down = s.states[`ird:${serial}`] === "down";

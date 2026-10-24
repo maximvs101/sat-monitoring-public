@@ -1,5 +1,6 @@
 """Détection d'événements à partir des mesures FSH4 et IRD."""
 
+import logging
 import statistics
 from dataclasses import replace
 from collections import deque
@@ -9,6 +10,8 @@ from .config import DetectConfig
 from .ird import IrdHealth, IrdLogMessage, IrdSample
 from .store import Store
 
+log = logging.getLogger(__name__)
+
 CRITICAL = "critical"
 WARNING = "warning"
 INFO = "info"
@@ -17,6 +20,7 @@ DEVICES_REASON = "appareils changés"
 REMOVED_REASON = "IRD retiré"
 VANISHED_REASON = "porteuse disparue"
 ALONE_DELAY_MS = 3000
+CLOCK_JUMP_MS = 10_000  # recul de l'heure au-delà duquel les instants retenus sont recalés
 DECODE_DELAY_MS = 3000
 RECEPTION_LOST_REASON = "réception perdue"
 DOWN_REASON = "IRD injoignable"
@@ -55,7 +59,8 @@ def _decode_conditions(s: IrdSample) -> dict:
     if s.scrambled and s.descrambled is False:
         out["not_descrambled"] = "programme non déchiffré"
     if s.bitrate_kbps == 0:
-        out["ts_stopped"] = "flux d'entrée arrêté"
+        # Flux d'entrée arrêté : l'image et le son disparaissent par conséquence ; seule la cause est signalée.
+        return {"ts_stopped": "flux d'entrée arrêté"}
     return out
 
 
@@ -84,6 +89,11 @@ class _DropRule:
     def _excluded(self, t):
         return any(start <= t and (end is None or t <= end) for start, end in self.excluded)
 
+    def shift(self, d: int) -> None:
+        """Heure du système reculée de d ms : l'historique suit, pour que les délais continuent de courir."""
+        self.values = deque((t - d, v) for t, v in self.values)
+        self.excluded = [[start - d, None if end is None else end - d] for start, end in self.excluded]
+
     def check(self, det, ts, value):
         if value is None:
             return []
@@ -106,7 +116,9 @@ class _DropRule:
         self.excluded = [iv for iv in self.excluded if iv[1] is None or iv[1] >= ts - self.window_ms]
         before = [(t, v) for t, v in self.values
                   if t <= cut and t < recent[0][0] and not self._excluded(t)]
-        if self.excluded and self.reference is not None:
+        # Les intervalles exclus sont gardés une fenêtre de plus (pour écarter leurs valeurs de la médiane), mais la
+        # référence n'est figée que pendant l'alerte et la minute qui suit.
+        if self.reference is not None and any(iv[1] is None or iv[1] >= ts for iv in self.excluded):
             # Dans la minute qui suit une alerte, la référence reste celle d'avant l'alerte.
             median = self.reference
         elif before and before[-1][0] - before[0][0] >= self.min_history_ms:
@@ -147,6 +159,7 @@ class _IrdRules:
         self.ber_event = None
         self.last_ber_high = None
         self.alone_event = None
+        self.alone_severity = None
         self.low_event = None   # « Marge basse » (sous le minimum fixe)
         self.low_since = None
         self.degraded_since = None  # début de la dégradation de réception en cours
@@ -164,6 +177,13 @@ class _IrdRules:
     def rename(self, name: str) -> None:
         self.name = name
         self.margin.prefix = f"{name} : "
+
+    def shift(self, d: int) -> None:
+        self.margin.shift(d)
+        for attr in ("last_ber_high", "low_since", "degraded_since", "program_since"):
+            if getattr(self, attr) is not None:
+                setattr(self, attr, getattr(self, attr) - d)
+        self.decode_since = {k: t - d for k, t in self.decode_since.items()}
 
     def reception_events(self) -> list:
         return [e for e in (self.lock_event, self.ts_lock_event, self.ber_event, self.margin.event_id, self.low_event)
@@ -184,6 +204,7 @@ class Detector:
         self.down_events = {}    # appareil (« fsh » ou « ird:<série> ») → événement « injoignable »
         self.names = {}          # numéro de série → nom (connu même avant la première lecture)
         self._alone_since = {}   # (série, groupe comparé) → depuis quand il est le seul dégradé de son groupe
+        self._last_ts = None     # dernier horodatage vu (recul de l'heure du système)
 
     def set_name(self, serial: str, name: str) -> None:
         self.names[serial] = name
@@ -236,6 +257,19 @@ class Detector:
                 r.decode_since.pop(kind, None)  # délai interrompu : repart de zéro
                 if kind in r.decode:
                     changed.append(self._close(r.decode.pop(kind), ts))
+        return changed
+
+    def _close_reception(self, r: _IrdRules, ts: int, reason: str) -> list[dict]:
+        """Lock, lock TS, BER, marge et messages du journal de l'IRD, fermés avec le motif."""
+        changed = []
+        for attr in ("lock_event", "ts_lock_event", "ber_event"):
+            if getattr(r, attr) is not None:
+                changed.append(self._close_with_reason(getattr(r, attr), ts, reason))
+                setattr(r, attr, None)
+        changed += r.margin.reset(self, ts, reason)
+        changed += self._close_low(r, ts, reason)
+        changed += [self._close_with_reason(e, ts, reason) for e in r.log_events.values()]
+        r.log_events.clear()
         return changed
 
     def _close_low(self, r: _IrdRules, ts: int, reason: str) -> list[dict]:
@@ -307,7 +341,7 @@ class Detector:
             if s.ber > self.cfg.ber_threshold:
                 r.last_ber_high = ts
                 if r.ber_event is None:
-                    r.ber_event, ev = self._open(ts, "ber_high", WARNING, f"{r.name} : BER {s.ber:.1e}", r.source)
+                    r.ber_event, ev = self._open(ts, "ber_high", WARNING, f"{r.name} : BER " + f"{s.ber:.1e}".replace(".", ","), r.source)
                     changed.append(ev)
             elif r.ber_event is not None and ts - r.last_ber_high >= self.cfg.ber_clear_s * 1000:
                 changed.append(self._close(r.ber_event, ts))
@@ -316,7 +350,25 @@ class Detector:
         changed += self._check_low(r, ts, s.margin_db)
         return changed
 
+    def _observe(self, ts: int) -> None:
+        """L'heure du système a reculé (NTP, réglage à la main) : tous les instants retenus reculent d'autant, sinon
+        les délais (fermeture du BER, confirmations, « seul en défaut ») attendraient que l'heure rattrape le retard."""
+        last = self._last_ts
+        if last is None or ts >= last - CLOCK_JUMP_MS:
+            # Lectures d'appareils différents légèrement désordonnées : rien à recaler.
+            self._last_ts = ts if last is None else max(ts, last)
+            return
+        d = last - ts
+        log.warning("Heure du système reculée de %.0f s : délais de détection recalés", d / 1000)
+        for r in self.irds.values():
+            r.shift(d)
+        for rule in (*self.carrier_rules.values(), self.noise):
+            rule.shift(d)
+        self._alone_since = {k: t - d for k, t in self._alone_since.items()}
+        self._last_ts = ts
+
     def on_ird(self, ts: int, serial: str, name: str, s: IrdSample) -> list[dict]:
+        self._observe(ts)
         self.names[serial] = name
         r = self._rules(serial, name)
         changed = self._check_decode(r, ts, s)
@@ -409,15 +461,21 @@ class Detector:
             del self._alone_since[key]
         changed = []
         for serial, r in self.irds.items():
+            # Critique si l'IRD a perdu le lock (TS compris) ou son programme ; suivie tant que l'alerte est ouverte.
+            severity = CRITICAL if (r.lock_event is not None or r.ts_lock_event is not None
+                                    or any(k in r.decode for k in PROGRAM_KINDS)) else WARNING
             if serial in should and r.alone_event is None:
                 carrier, normal = should[serial]
                 others = ", ".join(self.names.get(x, x) for x in normal)
                 detail = (f"{self.names.get(serial, r.name)} seul en défaut sur {carrier.name} ({others} normal)"
                           " — cause probable : équipement ou câblage")
-                severity = CRITICAL if r.lock_event is not None or any(k in r.decode for k in PROGRAM_KINDS) \
-                    else WARNING
                 r.alone_event, ev = self._open(ts, "ird_alone", severity, detail, r.source)
+                r.alone_severity = severity
                 changed.append(ev)
+            elif serial in should and severity == CRITICAL and r.alone_severity != CRITICAL:
+                self.store.set_severity(r.alone_event, CRITICAL)
+                r.alone_severity = CRITICAL
+                changed.append(self.store.event(r.alone_event))
             elif serial not in should and r.alone_event is not None:
                 changed.append(self._close(r.alone_event, ts))
                 r.alone_event = None
@@ -440,6 +498,7 @@ class Detector:
 
     def on_carrier_level(self, ts: int, carrier: Carrier, level_dbm: float) -> list[dict]:
         """Niveau RF d'une porteuse (son marqueur central)."""
+        self._observe(ts)
         rule = self.carrier_rules.get(carrier.key)
         if rule is None:
             rule = self.carrier_rules[carrier.key] = _DropRule(
@@ -457,6 +516,7 @@ class Detector:
 
     def on_noise(self, ts: int, level_dbm: float) -> list[dict]:
         """Niveau moyen des marqueurs placés sur le plancher de bruit."""
+        self._observe(ts)
         return self.noise.check(self, ts, level_dbm)
 
     def _reset_rf(self, ts: int, reason: str) -> list[dict]:
@@ -484,8 +544,11 @@ class Detector:
 
     def on_state(self, ts: int, device: str, state: str, detail: str) -> list[dict]:
         """`device` vaut « fsh » ou « ird:<série> »."""
+        if state == "paused" and device == "fsh" and device in self.down_events:
+            # En pause, le FSH4 n'est plus lu : son « injoignable » n'a plus de sens.
+            return [self._close_with_reason(self.down_events.pop(device), ts, "FSH4 en pause")]
         if state == "down" and device not in self.down_events:
-            label = "fsh"
+            label = detail if detail.startswith("FSH4") else f"FSH4 — {detail}" if detail else "FSH4"
             if device.startswith("ird:"):
                 # Nom de l'IRD et motif (« autre appareil à cette adresse », délai…) dans le détail.
                 label = self.names.get(device[4:], device[4:])
@@ -495,8 +558,10 @@ class Detector:
             changed = [ev]
             r = self.irds.get(device[4:]) if device.startswith("ird:") else None
             if r is not None:
-                # Plus de mesure : image, son, flux et matériel ne sont plus connus.
+                # Plus de mesure : réception, image, son, flux, journal et matériel ne sont plus connus. Fermées, ces
+                # alertes se rouvrent à la première lecture si le défaut est toujours là.
                 changed += self._close_decode(r, ts, DOWN_REASON)
+                changed += self._close_reception(r, ts, DOWN_REASON)
                 if r.hw_event is not None:
                     changed.append(self._close_with_reason(r.hw_event, ts, DOWN_REASON))
                     r.hw_event = None

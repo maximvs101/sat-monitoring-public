@@ -65,7 +65,8 @@ const FshPage = (() => {
     const noise = (data.noise || []).filter((n) => fsh.levels[n]);
     const all = fsh.nums.filter((n) => fsh.levels[n]);
     const label = (n) => `${Charts.markerLabel(n, fsh.freqs)} · ${own[n] || "sans porteuse"}`;
-    const sig = JSON.stringify([noise, all, all.map(label)]);
+    // L'état du FSH4 compte aussi : le message « pas de plancher de bruit » en dépend.
+    const sig = JSON.stringify([noise, all, all.map(label), live() && Store.state.states.fsh]);
     if (sig !== sigs.charts) {
       sigs.charts = sig;
       for (const k of Object.keys(charts)) if (charts[k]) charts[k].destroy();
@@ -99,7 +100,9 @@ const FshPage = (() => {
   }
 
   function fshEvents() {
-    const all = live() ? Store.liveEvents() : [...data.events].sort((a, b) => b.ts_start - a.ts_start);
+    // En cours d'abord, puis les plus récents (comme les autres listes).
+    const all = live() ? Store.liveEvents()
+      : [...data.events].sort((a, b) => (b.ts_end == null) - (a.ts_end == null) || b.ts_start - a.ts_start);
     return all.filter((e) => e.source === "fsh" || e.kind === "marker_drop");
   }
 

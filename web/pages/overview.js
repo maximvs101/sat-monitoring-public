@@ -92,9 +92,16 @@ const OverviewPage = (() => {
     return eventTarget(ev, Store.state.carriers, Date.now(), Store.state.cfg.event_padding_s * 1000);
   }
 
-  function onEventClick(ev) {
-    const target = targetOf(ev);
+  // Événement d'un IRD : la porteuse où il était à ce moment-là (il a pu être re-réglé depuis), comme le journal.
+  async function onEventClick(ev) {
+    const page = dom;
+    const { target, message } = await eventDestination(ev);
+    if (dom !== page) return;
     if (target) location.hash = routeHref(target);
+    else {
+      dom.notice.hidden = false;
+      dom.notice.textContent = message;
+    }
   }
 
   function renderEvents() {
@@ -102,7 +109,7 @@ const OverviewPage = (() => {
     const sig = JSON.stringify(events.map((e) => [e.id, e.ts_end, e.detail]));
     if (sig === sigs.events) return;
     sigs.events = sig;
-    dom.events.replaceChildren(events.length ? eventList(events, { onClick: onEventClick, isLink: (ev) => !!targetOf(ev) }) : emptyState("Aucun événement récent."));
+    dom.events.replaceChildren(events.length ? eventList(events, { onClick: onEventClick, isLink: (ev) => ev.source?.startsWith("ird:") || !!targetOf(ev) }) : emptyState("Aucun événement récent."));
   }
 
   // Plancher de bruit : marqueurs placés hors porteuse (recréé quand ils changent).
@@ -145,13 +152,15 @@ const OverviewPage = (() => {
       grid: el("div", { className: "ird-grid" }),
       empty: emptyState("Aucun IRD suivi : en ajouter un dans Réglages › Appareils."),
       events: el("div"),
+      notice: el("p", { className: "muted note", hidden: true }),  // événement sans page à ouvrir
     };
     [dom.noise, dom.noiseZone] = Charts.chartCard("Plancher de bruit (FSH4)", "marqueurs hors porteuse · dBm");
+    dom.noise.querySelector(".card-title .unit").append(" · ", el("a", { href: routeHref({ page: "fsh" }), textContent: "Analyseur →" }));
     dom.noise.hidden = true;
     const head = el("div", { className: "page-head" }, el("h1", { textContent: "Vue d'ensemble" }), dom.meta);
     const side = el("div", { className: "overview-side" },
       cardBox(el("div", { className: "card-title" }, el("span", { textContent: "Événements en cours et récents" }),
-        el("a", { href: routeHref({ page: "journal" }), className: "unit", textContent: "Tout le journal →" })), dom.events));
+        el("a", { href: routeHref({ page: "journal" }), className: "unit", textContent: "Tout le journal →" })), dom.notice, dom.events));
     view.append(el("div", { className: "page" }, head, dom.ifBanner, dom.kpis,
       el("div", { className: "overview-main" }, el("div", {}, dom.grid, dom.empty, dom.noise), side)));
     render();

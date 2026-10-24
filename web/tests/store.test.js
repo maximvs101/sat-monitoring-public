@@ -93,3 +93,38 @@ test("un rechargement demandé pendant un autre n'est pas perdu", async () => {
   assert.strictEqual(srv.calls.length, 0);  // plus rien en attente
   assert.strictEqual(srv.counts.status, 3);  // démarrage, rechargement, rechargement redemandé
 });
+
+test("fenêtre du direct longue : jamais de points regroupés mêlés aux points bruts", async () => {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(url);
+    const body = url.startsWith("/api/status")
+      ? { now: 100_000_000, config: { live_window_min: 30, max_points: 5000, event_padding_s: 30 }, carriers: [],
+        marker_map: { noise: [], if_warning: false }, irds: {}, fsh: { state: "up" }, devices: {} }
+      : url.startsWith("/api/series") ? { fsh: {}, irds: {}, names: {} } : [];
+    return { ok: true, status: 200, json: async () => body };
+  };
+  const { Store } = loadStore(fetchImpl);
+  await Store.start();
+  const series = urls.find((u) => u.startsWith("/api/series"));
+  const points = Number(new URL(series, "http://x").searchParams.get("max_points"));
+  assert.ok(points >= 30 * 60 * 4, `max_points=${points}`);  // FSH4 à 4 Hz sur 30 min
+});
+
+test("flux en direct fermé (réponse en erreur) : la page se reconnecte seule", async () => {
+  const timers = [];
+  const sources = [];
+  const ctx = vm.createContext({
+    fetch: async () => ({ ok: false, status: 500 }), console, Date, Map, Set, Promise, JSON, Math, Number, Object, Array, Error,
+    setInterval: () => 1, setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: () => {},
+    EventSource: class { constructor() { this.readyState = 0; sources.push(this); } close() { this.readyState = 2; } },
+  });
+  ctx.EventSource.CLOSED = 2;
+  vm.runInContext(fs.readFileSync(path.join(__dirname, "..", "store.js"), "utf8") + "\nthis.Store = Store;", ctx);
+  await ctx.Store.start().catch(() => {});
+  sources[0].readyState = 2;  // le navigateur abandonne après une réponse HTTP en erreur
+  sources[0].onerror();
+  assert.ok(timers.length >= 1, "reconnexion programmée");
+  timers[timers.length - 1].fn();
+  assert.strictEqual(sources.length, 2);
+});

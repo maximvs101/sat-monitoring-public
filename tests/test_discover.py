@@ -1,11 +1,13 @@
 import ipaddress
 import socket
+import subprocess
 import threading
 import unittest
+from unittest import mock
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
-from monitoring.discover import parse_ifconfig, parse_ipconfig, probe_fsh, probe_ird, scan, scan_hosts
+from monitoring.discover import local_networks, parse_ifconfig, parse_ipconfig, probe_fsh, probe_ird, scan, scan_hosts
 from tests.fake_scpi import FakeScpi
 
 IFCONFIG = """lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
@@ -113,6 +115,22 @@ class DiscoverTest(unittest.TestCase):
         nets = parse_ifconfig(IFCONFIG)
         # Ni boucle locale ni lien local ; un réseau plus large qu'un /24 est réduit au /24 du Mac.
         self.assertEqual(nets, [ipaddress.ip_network("10.10.1.0/24"), ipaddress.ip_network("172.16.4.0/24")])
+
+    def test_parse_ifconfig_linux(self):
+        # Linux (net-tools) : masque en notation décimale pointée, et l'ancienne forme « inet addr: … Mask: … ».
+        linux = ("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500\n"
+                 "        inet 192.168.10.20  netmask 255.255.255.0  broadcast 192.168.10.255\n"
+                 "eth1      Link encap:Ethernet\n          inet addr:10.20.0.5  Bcast:10.20.0.255  Mask:255.255.0.0\n")
+        self.assertEqual(parse_ifconfig(linux), [ipaddress.ip_network("192.168.10.0/24"), ipaddress.ip_network("10.20.0.0/24")])
+
+    def test_no_ifconfig_gives_empty_list(self):
+        # Linux récent sans net-tools : pas d'ifconfig. Pas d'erreur, juste aucun réseau (puis « ip » si présent).
+        with mock.patch("monitoring.discover.subprocess.run", side_effect=FileNotFoundError("ifconfig")), \
+                mock.patch("monitoring.discover.sys.platform", "linux"):
+            self.assertEqual(local_networks(), [])
+        with mock.patch("monitoring.discover.subprocess.run", side_effect=subprocess.TimeoutExpired("ipconfig", 5)), \
+                mock.patch("monitoring.discover.sys.platform", "win32"):
+            self.assertEqual(local_networks(), [])
 
     def test_parse_ipconfig_english_and_french(self):
         # Windows : adresse puis masque, quelle que soit la langue ; lien local écarté, réseau large réduit au /24.

@@ -43,6 +43,24 @@ class StoreTest(unittest.TestCase):
             self.assertLessEqual(lo, avg)
             self.assertLessEqual(avg, hi)
 
+    def test_markers_of_one_reading_written_together(self):
+        # Une lecture du FSH4 (jusqu'à 6 marqueurs) : une seule écriture, pas une par marqueur.
+        statements = []
+        self.store._db.set_trace_callback(statements.append)
+        self.store.add_markers(1000, {1: MarkerSample(11.2e9, -40.0), 4: MarkerSample(11.21e9, -67.0)})
+        self.store._db.set_trace_callback(None)
+        self.assertEqual(sum(1 for q in statements if q.startswith("INSERT")), 1)
+        self.assertEqual(sorted(self.store.marker_series(0, 2000, 10)), [1, 4])
+
+    def test_last_lock_lookup_is_bounded(self):
+        # Débit symbole du dernier lock : cherché dans le mois qui précède, pas dans tout l'historique.
+        tuned = dict(rf_khz=12_592_060, polarization="vertical")
+        self.store.add_ird(1000, "A", replace(ird(), symbol_rate=7_200_000, roll_off=0.25, **tuned))
+        late = 40 * 86_400_000
+        self.store.add_ird(late, "A", replace(ird(locked=False), symbol_rate=0, roll_off=0.35, **tuned))
+        tuning = self.store.ird_series(late - 1000, late + 1000, 100)["A"]["tuning"]
+        self.assertIsNone(tuning["symbol_rate"])
+
     def test_aggregated_state_durations(self):
         # 30 jours ≈ intervalles de 29 min : une perte de lock de 2 s doit compter 2 s, pas tout l'intervalle.
         for i in range(600):

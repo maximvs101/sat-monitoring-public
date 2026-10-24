@@ -16,7 +16,7 @@ const DEFAULT_TOLERANCE_KHZ = 1_000;  // comme monitoring/carriers.py, sans déb
 
 const num = (v, digits) => v.toFixed(digits).replace(".", ",");
 const fmt = (v, digits, unit) => (v == null ? "—" : `${num(v, digits)} ${unit}`);
-const fmtBer = (v) => (v == null ? "—" : v <= 1e-8 ? "< 1e-8" : v.toExponential(1));
+const fmtBer = (v) => (v == null ? "—" : v <= 1e-8 ? "< 1e-8" : v.toExponential(1).replace(".", ","));
 
 // --- Adresses des pages : #/, #/porteuse/<clé>, #/journal, #/fsh4, #/reglages/<onglet> ; paramètres après « ? » ---
 
@@ -79,10 +79,10 @@ function periodLabel(period, liveMin) {
 
 // --- Porteuses ---
 
-// Fréquence et polarisation d'une clé « <rf_khz // 100>-V|H|? ».
+// Fréquence et polarisation d'une clé « <rf_khz // 100>-V|H|? » (ou plus fine : « 125830.9-V »).
 function carrierKeyRef(key) {
-  const m = /^(\d+)-([VH?])$/.exec(key || "");
-  return m ? { rf_khz: Number(m[1]) * 100, polarization: POLARIZATIONS[m[2]] || null } : null;
+  const m = /^(\d+(?:\.\d+)?)-([VH?])(?:-\d+)?$/.exec(key || "");
+  return m ? { rf_khz: Math.round(Number(m[1]) * 100), polarization: POLARIZATIONS[m[2]] || null } : null;
 }
 
 function _close(a, b) {
@@ -103,6 +103,10 @@ function matchCarrier(carriers, ref) {
   const candidates = carriers.filter((c) => (!c.polarization || !target.polarization || c.polarization === target.polarization)
     && _close(c, target));
   candidates.sort((a, b) => Math.abs(a.rf_khz - target.rf_khz) - Math.abs(b.rf_khz - target.rf_khz));
+  // Polarisation inconnue et porteuses V et H à cette fréquence : impossible de savoir laquelle, aucune.
+  if (!target.polarization && new Set(candidates.map((c) => c.polarization).filter(Boolean)).size > 1) {
+    return candidates.find((c) => !c.polarization) || null;
+  }
   return candidates[0] || null;
 }
 

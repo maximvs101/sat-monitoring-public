@@ -2,6 +2,7 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -313,6 +314,40 @@ class ServerTest(unittest.TestCase):
                            ("/api/discover", None), ("/api/fsh/pause", None)):
             self.assertEqual(self.post(path, body, evil)[0], 403, path)
         self.assertIn("S1", self.app.ird_loops)
+
+    def test_carrier_frequency_and_duplicates_refused(self):
+        status, body = self.post("/api/carriers", {"name": "Absurde", "freq_mhz": 99999999.0, "manual": True})
+        self.assertEqual(status, 400)
+        self.assertIn("MHz", json.loads(body)["erreur"])
+        self.assertEqual(self.post("/api/carriers", {"name": "A", "freq_mhz": 11685.0, "polarization": "horizontal"})[0], 201)
+        status, body = self.post("/api/carriers", {"name": "B", "freq_mhz": 11685.2, "polarization": "horizontal"})
+        self.assertEqual(status, 409)
+        self.assertIn("existe déjà", json.loads(body)["erreur"])
+
+    def test_huge_range_is_400(self):
+        status, _ = self.get(f"/api/series?from=0&to={10**30}&max_points=10")
+        self.assertEqual(status, 400)
+
+    def test_origin_ipv6_loopback_accepted(self):
+        self.assertEqual(self.post("/api/fsh/pause", None, {"Origin": f"http://[::1]:{self.port}"})[0], 204)
+
+    def test_stalled_post_body_does_not_hold_a_thread_forever(self):
+        import socket
+        default = self.httpd.RequestHandlerClass.timeout
+        self.assertIsNotNone(default)  # sans délai, un client qui n'envoie pas tout bloque un fil pour toujours
+        self.assertLessEqual(default, 60)
+        self.httpd.RequestHandlerClass.timeout = 0.5
+        self.addCleanup(setattr, self.httpd.RequestHandlerClass, "timeout", default)
+        s = socket.create_connection(("127.0.0.1", self.port))
+        s.sendall(b"POST /api/fsh HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 100\r\n\r\n{")
+        s.settimeout(3)
+        t0 = time.monotonic()
+        try:
+            s.recv(4096)
+        except OSError:
+            pass
+        s.close()
+        self.assertLess(time.monotonic() - t0, 2.5)
 
     def test_discover(self):
         status, body = self.post("/api/discover", None, {"Origin": f"http://localhost:{self.port}"})

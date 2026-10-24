@@ -2,7 +2,7 @@
 
 ## État actuel (24 octobre 2026)
 
-- Branche `main` ; 273 tests Python et 17 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 304 tests Python et 22 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
@@ -14,29 +14,23 @@
 
 - FSH4 192.168.10.99 : licence FSH-K40 à obtenir (ou remettre l'ancien FSH4 en V1.20).
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
-- Essayer `MonitoringSat.exe` (release v1.0.2) sur un vrai PC Windows du réseau des appareils. Nouvelle version : pousser un tag `v…`.
+- Essayer `MonitoringSat.exe` (dernière release) sur un vrai PC Windows du réseau des appareils. Nouvelle version : pousser un tag `v…`.
 - Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
-- Point mineur reporté de la revue du 22/10 : une seule cause ouvre plusieurs critiques (flux arrêté + image perdue).
-- Points mineurs reportés de la refonte de la page (22/10) :
-  - carte « Plancher de bruit » de la vue d'ensemble sans lien vers l'analyseur FSH4 ;
-  - menu sans entrée en surbrillance quand la clé de la porteuse ouverte change (ex. 125830-? → 125830-V) ;
-  - journal chargé sans limite de nombre (34 événements sur 30 j aujourd'hui) ;
-  - clé à polarisation inconnue avec deux porteuses V et H de même fréquence : correspondance au plus proche, arbitraire ;
-  - fréquence d'une porteuse saisie : le service accepte toute valeur positive.
-- Points mineurs reportés de la vérification complète du 22/10 :
-  - alertes de réception (lock, BER, marge) et warnings du journal restent ouverts pendant qu'un IRD est injoignable ; `device_down` du FSH4 reste ouvert pendant une pause, avec « fsh » pour seul détail ;
-  - cadence : la durée du traitement (base, détection) s'ajoute à la période ; plus de 10 réponses « occupé » de suite comptent comme échecs ;
-  - fenêtre d'une aller-retour entre `CALC:MARKn?` et `:Y?` (marqueur éteint par l'opérateur juste entre les deux : rallumé) — touches verrouillées en mode Remote, risque théorique ;
-  - course bénigne sur les règles de porteuse (FSH4 contre IRD) ;
-  - page en Direct si `live_window_min × 60 × 4 > max_points` : séries agrégées complétées de points bruts ;
-  - SQLite : dernier état des appareils et `events()` sans index adapté ;
-  - réécriture de `config.toml` : commentaires entre blocs `[[irds]]`/`[[carriers]]` perdus ; porteuse sans `freq_mhz` ou `rate_hz = 0` : erreur peu claire au démarrage ; ajout de porteuse sans dédoublonnage.
+- Limites assumées (pas des défauts à corriger) :
+  - FSH4 V1.20 : il reste un aller-retour réseau entre « marqueur allumé ? » et la lecture de sa fréquence ou de son niveau ; un marqueur éteint par l'opérateur exactement à ce moment serait rallumé (le protocole n'a pas de lecture atomique ; touches verrouillées en mode Remote) ;
+  - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
+  - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable ».
 
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Lot 2 de corrections** (tous les autres points des revues, et les mineurs reportés depuis le 22/10) :
+  - alertes : référence de chute figée une minute après une alerte (pas deux) ; « IRD seul en défaut » qui devient critique si l'IRD perd ensuite le lock ; pas de « réglage FSH4 modifié » à tort après un changement de FSH4 ; deux porteuses très proches n'ont plus la même clé (« 125830.9-V ») ; liste de porteuses ancienne jamais publiée après une plus récente ; IRD injoignable : lock, BER, marge et journal fermés (« IRD injoignable »), rouverts au retour si besoin ; FSH4 en pause : son « injoignable » fermé ; détail « FSH4 — … » au lieu de « fsh » ; flux d'entrée arrêté : une seule alerte (la cause), plus d'« image perdue » en plus ; heure du système qui recule : délais recalés ; marqueur imposé comme bruit retiré de sa porteuse ; BER à la française (« 1,0e-04 ») ;
+  - collecte : fréquence d'un marqueur lue juste après son contrôle ; pause et reprise, changement d'appareil sans course ; lecture de la file d'erreurs du FSH4 courte (0,5 s) ; voie audio à identifiant non numérique tolérée ; « réponse trop lente » au lieu d'« injoignable » ; entrée en bande L directe mesurée ; durée du traitement comptée dans la cadence ;
+  - réglages et service : `config.toml` vérifié au chargement (types, bornes, fréquence de 950 à 40 000 MHz) avec messages en clair ; en-têtes « [ fsh ] » acceptés ; commentaires entre blocs gardés ; écriture jusqu'au disque, retentée si Windows bloque le fichier ; enregistré avant d'être appliqué (un IRD n'est suivi qu'une fois enregistré) ; porteuse saisie en double refusée ; requêtes bornées (nombres trop grands → 400, client bloqué coupé après 30 s, page ouverte en [::1] acceptée) ; marqueurs d'une lecture écrits en une fois ; recherche du dernier lock bornée au mois ; recherche réseau sous Linux (masque pointé, `ip` sans ifconfig) ;
+  - page : direct qui se reconnecte seul ; saisie dans le tableau des IRD gardée ; événements et cartes au clavier (Tab, Entrée, Espace) ; couleur des IRD toujours celle de leur courbe ; événement d'IRD ouvert sur la porteuse de l'époque (vue d'ensemble comme journal) ; filtre « porteuse » du journal d'après qui était sur elle, porteuses disparues proposées ; journal limité à 500 lignes ; lien de la carte « Plancher de bruit » vers l'analyseur ; menu en surbrillance même si la clé a changé ; clé « ? » ambiguë (V et H) : plus de choix au hasard ; formulaire de période vide expliqué ; libellés harmonisés (« Pause » / « Reprendre », « injoignable », tournures impersonnelles).
 - **Revue complète** (quatre relectures : collecte, alertes, service et base, page) puis **lot 1 de corrections** :
   - page : carte « SANS NOUVELLES » et valeurs « — » quand le direct est coupé ou qu'un IRD n'a plus de mesure depuis 10 s (au lieu de « OK » figé), « IRD en service » à « — » ; événement fermé pendant un rechargement gardé ; rechargement demandé pendant un autre refait ensuite ;
   - alertes : « IRD seul en défaut » compté depuis qu'il est seul dégradé (plus d'alerte « câblage » après une coupure commune) ; plus d'« Appareil injoignable » orphelin pour un IRD retiré ; BER sans valeur quand l'IRD est déverrouillé ;

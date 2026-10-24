@@ -5,6 +5,7 @@ from pathlib import Path
 
 from monitoring.carriers import Carrier
 from monitoring.config import DetectConfig
+from monitoring.ird import IrdLogMessage
 from monitoring.detect import Detector
 from monitoring.fsh import MarkerSample
 from monitoring.store import Store
@@ -232,6 +233,31 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(self.kinds(open_only=True), ["marker_drop"])
         self.assertIn("référence -46,0 dBm", self.store.events(0, 10**12)[0]["detail"])
 
+    def test_ber_detail_in_french(self):
+        self.feed(ird(ber=1e-4), 1)
+        [ev] = [e for e in self.store.events(0, 10**12) if e["kind"] == "ber_high"]
+        self.assertEqual(ev["detail"], "IRD A : BER 1,0e-04")
+
+    def test_clock_stepping_back_does_not_freeze_alerts(self):
+        # L'heure du système recule d'une heure (synchronisation NTP, réglage à la main) pendant un BER élevé : le
+        # BER doit se refermer 5 s après le retour à 0, pas une heure plus tard.
+        self.feed(ird(ber=1e-4), 2)
+        self.t -= 3_600_000
+        self.feed(ird(), 6)
+        self.assertEqual(self.kinds(open_only=True), [])
+
+    def test_reference_frozen_one_minute_only(self):
+        # Après une alerte, la référence reste figée une minute (pas deux) : un nouveau niveau normal installé ensuite
+        # sert de référence dès qu'une minute d'historique propre existe.
+        fsh = lambda level, s: self.feed(MarkerSample(11.22e9, level), s, kind="fsh")
+        fsh(-50.0, 60)
+        fsh(-56.0, 10)   # chute : alerte, référence -50
+        fsh(-50.0, 5)    # retour : fermée vers t = 72 s
+        fsh(-40.0, 100)  # nouveau niveau normal
+        fsh(-45.0, 5)    # -5 dB sous -40 : chute (avec une référence figée à -50 pendant 2 min, rien)
+        self.assertEqual(self.kinds(open_only=True), ["marker_drop"])
+        self.assertIn("référence -40,0 dBm", [e for e in self.store.events(0, 10**12) if e["ts_end"] is None][0]["detail"])
+
     # --- IRD multiples et porteuses ---
 
     def step(self, a=None, b=None, carriers=(SHARED,), reachable=("A", "B")):
@@ -288,6 +314,16 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(self.alone(open_only=False), [])
         self.step(ird(locked=False), ird())
         self.assertEqual(len(self.alone()), 1)
+
+    def test_alone_severity_follows_the_fault(self):
+        # Ouverte sur un BER élevé (avertissement), l'alerte devient critique si l'IRD perd ensuite le lock (TS compris).
+        for _ in range(5):
+            self.step(ird(ber=1e-4), ird())
+        [ev] = self.alone()
+        self.assertEqual(ev["severity"], "warning")
+        self.step(replace(ird(ber=1e-4), ts_locked=False), ird())
+        [ev] = self.alone()
+        self.assertEqual(ev["severity"], "critical")
 
     def test_alone_closes_when_other_degrades(self):
         for _ in range(5):
@@ -354,9 +390,41 @@ class DetectTest(unittest.TestCase):
         self.det.on_state(self.t, "ird:A", "down", "délai")
         self.t += 1000
         changed = self.det.remove_ird(self.t, "A")
-        self.assertEqual(sorted(e["kind"] for e in changed), ["device_down", "ird_alone", "lock_lost"])
+        self.assertEqual(sorted(e["kind"] for e in changed), ["device_down", "ird_alone"])  # lock fermé à l'injoignable
         self.assertTrue(all(e["detail"].endswith("— IRD retiré") for e in changed))
         self.assertEqual(self.kinds(open_only=True), [])
+
+    def test_unreachable_ird_closes_reception_alerts(self):
+        # Injoignable : lock, BER, marge et journal ne sont plus connus. Fermés (« IRD injoignable ») ; ils se
+        # rouvrent à la première lecture si le défaut est toujours là.
+        self.feed(ird(), 70)
+        self.feed(ird(locked=False), 2)
+        self.det.on_logs(self.t, "A", [])  # premier relevé : référence du journal
+        self.det.on_logs(self.t, "A", [IrdLogMessage(7, "No input activity", "warning", False)])
+        self.assertEqual(sorted(self.kinds(open_only=True)), ["ird_log", "lock_lost"])
+        self.det.on_state(self.t, "ird:A", "down", "délai")
+        self.assertEqual(self.kinds(open_only=True), ["device_down"])
+        closed = [e for e in self.store.events(0, 10**12) if e["kind"] in ("lock_lost", "ird_log")]
+        self.assertTrue(all(e["detail"].endswith("— IRD injoignable") for e in closed), closed)
+        self.det.on_state(self.t + 1000, "ird:A", "up", "")
+        self.feed(ird(locked=False), 1)
+        self.assertEqual(self.kinds(open_only=True), ["lock_lost"])
+
+    def test_fsh_down_detail_and_pause(self):
+        [ev] = self.det.on_state(1000, "fsh", "down", "FSH4 injoignable : timed out")
+        self.assertEqual(ev["detail"], "FSH4 injoignable : timed out")
+        self.det.on_state(1500, "fsh", "up", "")
+        [ev] = self.det.on_state(1600, "fsh", "down", "pas de réponse à FREQ:SPAN? : timed out")
+        self.assertEqual(ev["detail"], "FSH4 — pas de réponse à FREQ:SPAN? : timed out")
+        # Mise en pause : l'appareil n'est plus lu, son « injoignable » n'a plus de sens.
+        [closed] = self.det.on_state(2000, "fsh", "paused", "")
+        self.assertTrue(closed["detail"].endswith("— FSH4 en pause"))
+
+    def test_input_stopped_is_one_alert(self):
+        # Flux d'entrée arrêté : l'image (et le son) disparaissent par conséquence. Une seule alerte, la cause.
+        stopped = replace(ird(), bitrate_kbps=0, video_active=False, audio_configured=2, audio_active=0)
+        self.feed(stopped, 5)
+        self.assertEqual(self.kinds(open_only=True), ["ts_stopped"])
 
     def test_ird_down_detail_has_name_and_reason(self):
         self.det.set_name("S9", "IRD 9")  # jamais lu : le nom vient de la configuration
@@ -591,7 +659,7 @@ class DetectTest(unittest.TestCase):
         self.det.on_state(1000, "fsh", "down", "délai")
         self.det.on_state(2000, "fsh", "down", "délai")
         self.assertEqual(self.kinds(open_only=True), ["device_down"])
-        self.assertEqual(self.store.events(0, 10**12)[0]["detail"], "fsh")
+        self.assertEqual(self.store.events(0, 10**12)[0]["detail"], "FSH4 — délai")
         changed = self.det.on_state(3000, "fsh", "up", "")
         self.assertEqual(changed[0]["ts_end"], 3000)
         self.assertEqual(self.kinds(open_only=True), [])

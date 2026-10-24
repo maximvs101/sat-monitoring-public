@@ -41,6 +41,7 @@ SERIES_COLUMNS = {
 MARKER_STALE_MS = 30_000
 READERS = 4  # connexions de lecture simultanées (requêtes de la page)
 PURGE_BATCH = 50_000  # lignes supprimées par lot
+LAST_LOCK_MS = 30 * 86_400_000  # recherche du débit symbole du dernier lock
 STATE_GAP_MS = 3000  # au-delà, le trou entre deux mesures d'un IRD est une coupure (rien n'est compté)
 # Une perte de lock ne doit pas disparaître dans une moyenne.
 MIN_AGGREGATED = {"locked", "ts_locked"}
@@ -127,6 +128,13 @@ class Store:
         self._exec("INSERT INTO fsh_marker (ts, freq_hz, level_dbm, n) VALUES (?, ?, ?, ?)",
                    (ts, s.freq_hz, s.level_dbm, n))
 
+    def add_markers(self, ts: int, markers: dict) -> None:
+        """Tous les marqueurs d'une lecture du FSH4 en une seule écriture : {numéro: MarkerSample}."""
+        if markers:
+            rows = [v for n, m in markers.items() for v in (ts, m.freq_hz, m.level_dbm, n)]
+            self._exec("INSERT INTO fsh_marker (ts, freq_hz, level_dbm, n) VALUES "
+                       + ", ".join(["(?, ?, ?, ?)"] * len(markers)), rows)
+
     def add_ird(self, ts: int, serial: str, s: IrdSample) -> None:
         d = asdict(s)
         for c in BOOL_COLUMNS:
@@ -156,6 +164,9 @@ class Store:
     def close_event(self, event_id: int, ts_end: int, detail: str | None = None) -> None:
         """Ferme l'événement ; `detail` remplace son détail (motif de fermeture ajouté)."""
         self._exec("UPDATE events SET ts_end = ?, detail = COALESCE(?, detail) WHERE id = ?", (ts_end, detail, event_id))
+
+    def set_severity(self, event_id: int, severity: str) -> None:
+        self._exec("UPDATE events SET severity = ? WHERE id = ?", (severity, event_id))
 
     def close_open_events(self, ts_end: int) -> int:
         return self._exec("UPDATE events SET ts_end = MAX(ts_start, ?) WHERE ts_end IS NULL", (ts_end,)).rowcount
@@ -212,9 +223,10 @@ class Store:
             if s["tuning"] and not s["tuning"]["symbol_rate"]:
                 # Déverrouillé en fin de période : débit symbole et roll-off du dernier lock sur cette fréquence.
                 # Même porteuse : à moins d'un demi-débit symbole (fréquence mesurée contre fréquence configurée).
-                last = self._all("SELECT symbol_rate, roll_off FROM ird_sat WHERE ird = ? AND ts <= ? AND locked = 1 "
-                                 "AND symbol_rate > 0 AND ABS(rf_khz - ?) * 2000 < symbol_rate ORDER BY ts DESC LIMIT 1",
-                                 (serial, to_ts, s["tuning"]["rf_khz"]))
+                # Dans le mois qui précède seulement : sans lock récent, inconnu (et pas de parcours de tout l'historique).
+                last = self._all("SELECT symbol_rate, roll_off FROM ird_sat WHERE ird = ? AND ts <= ? AND ts >= ? "
+                                 "AND locked = 1 AND symbol_rate > 0 AND ABS(rf_khz - ?) * 2000 < symbol_rate "
+                                 "ORDER BY ts DESC LIMIT 1", (serial, to_ts, to_ts - LAST_LOCK_MS, s["tuning"]["rf_khz"]))
                 s["tuning"]["symbol_rate"], s["tuning"]["roll_off"] = last[0] if last else (None, None)
             s["segments"] = self._segments(serial, from_ts, to_ts)
             out[serial] = s

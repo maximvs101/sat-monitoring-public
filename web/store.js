@@ -4,6 +4,7 @@
 // événements), flux en direct. Les pages s'abonnent (`subscribe`) et chargent une période passée avec `loadRange`.
 
 const Store = (() => {
+  const RECONNECT_MS = 5000;
   const state = {
     cfg: { live_window_min: 10, event_padding_s: 30, max_points: 5000 },
     connected: false,       // flux en direct ouvert
@@ -134,7 +135,9 @@ const Store = (() => {
       status = await getJSON("/api/status");
       const [from, to] = [status.now - status.config.live_window_min * 60_000, status.now];
       [series, events] = await Promise.all([
-        getJSON(`/api/series?from=${from}&to=${to}&max_points=${status.config.max_points}`),
+        // Assez de points pour toute la fenêtre (FSH4 jusqu'à 4 Hz) : sinon le service regrouperait les points et
+        // les mesures reçues ensuite s'ajouteraient brutes à une série regroupée.
+        getJSON(`/api/series?from=${from}&to=${to}&max_points=${Math.max(status.config.max_points, status.config.live_window_min * 60 * 5)}`),
         getJSON(`/api/events?from=${from}&to=${to}`),
       ]);
     } finally {
@@ -237,10 +240,11 @@ const Store = (() => {
     }
   }
 
-  function startLive() {
+  // `again` : nouvelle connexion après un abandon du navigateur ; à l'ouverture, tout est rechargé.
+  function startLive(again = false) {
     source = new EventSource("/api/live");
     source.onmessage = (e) => onLive(JSON.parse(e.data));
-    let opened = false;
+    let opened = again;
     source.onopen = () => {
       state.connected = true;
       notify("state");
@@ -251,6 +255,9 @@ const Store = (() => {
     source.onerror = () => {
       state.connected = false;
       notify("state");
+      // Sur une réponse HTTP en erreur (service en cours de redémarrage…), le navigateur abandonne pour de bon :
+      // on rouvre nous-mêmes un peu plus tard.
+      if (source.readyState === EventSource.CLOSED) setTimeout(() => startLive(true), RECONNECT_MS);
     };
   }
 

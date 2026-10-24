@@ -77,6 +77,22 @@ function eventSource(ev, names = Store.state.names) {
   return "FSH4";
 }
 
+// Où mène un événement : la porteuse où se trouvait l'IRD au moment de l'événement (porteuses recalculées autour de
+// lui, car l'IRD a pu être re-réglé depuis), la porteuse concernée, ou l'analyseur FSH4. { target } ou { message }.
+async function eventDestination(ev) {
+  const pad = Store.state.cfg.event_padding_s * 1000;
+  let carriers = Store.state.carriers;
+  if (ev.source?.startsWith("ird:")) {
+    try {
+      carriers = (await Store.loadRange(ev.ts_start - pad, (ev.ts_end ?? Date.now()) + pad, 50)).carriers;
+    } catch (e) {
+      return { message: `Chargement impossible : ${e.message}` };
+    }
+  }
+  const target = eventTarget(ev, carriers, Date.now(), pad);
+  return target ? { target } : { message: `${eventSource(ev)} n'appartenait à aucune porteuse à ce moment-là : pas de page à ouvrir.` };
+}
+
 // Liste d'événements : gravité en couleur, type, source, début → fin ou « en cours », détail. `onClick(ev)` facultatif ;
 // `isLink(ev)` dit si un événement mène quelque part (sinon il n'a pas l'air cliquable).
 function eventList(events, { onClick = null, isLink = () => true, names } = {}) {
@@ -91,7 +107,18 @@ function eventList(events, { onClick = null, isLink = () => true, names } = {}) 
       el("div", {}, el("span", { className: "what", textContent: KINDS[ev.kind] || ev.kind }),
         el("span", { className: "src", textContent: ` · ${eventSource(ev, names)}` }), when,
         el("div", { className: "detail", textContent: ev.detail })));
-    if (link) item.addEventListener("click", () => onClick(ev));
+    if (link) {
+      // Au clavier aussi : Tab jusqu'à l'événement, puis Entrée ou Espace.
+      item.tabIndex = 0;
+      item.setAttribute("role", "link");
+      item.addEventListener("click", () => onClick(ev));
+      item.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick(ev);
+        }
+      });
+    }
     list.append(item);
   }
   return list;

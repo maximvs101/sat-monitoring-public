@@ -148,6 +148,14 @@ def _num(el, path, conv, scale=1):
         return None
 
 
+def _slot(voice) -> int:
+    """Emplacement d'une voie audio ; -1 s'il est absent ou non numérique (autre firmware)."""
+    try:
+        return int(voice.get("id", -1))
+    except ValueError:
+        return -1
+
+
 def _parse_details(root, prog, decoding=True) -> IrdDetails | None:
     out = root.find("presets/v1[@id='0']/channel/output")
     if prog is None and out is None:
@@ -162,7 +170,7 @@ def _parse_details(root, prog, decoding=True) -> IrdDetails | None:
                      video_fps=num / den if num and den else None, video_dar=_text(dec, "dar"))
         d["video_pid"] = _num(prog, "video/configuration/pid", int)
         d["audio"] = tuple(
-            AudioVoice(int(a.get("id", -1)), _num(a, "configuration/decoded/pid", int), _text(a, "status/decoded/codec"),
+            AudioVoice(_slot(a), _num(a, "configuration/decoded/pid", int), _text(a, "status/decoded/codec"),
                        _num(a, "status/decoded/numChannels", int), _num(a, "status/decoded/sampleRate", int),
                        _num(a, "status/decoded/bitrate", int), _bool(a, "status/hasActivity"))
             for a in _configured_voices(prog))
@@ -215,7 +223,7 @@ def parse_refresh(data: bytes) -> IrdSample:
     if_khz = _num(inp, "sat/frequency", int)
     lo_khz = _num(root, f"{ACTIVE_SAT}/oscillatorFrequency", int)
     downlink_khz = _num(root, f"{ACTIVE_SAT}/downlinkFrequency", int)
-    if locked and if_khz and lo_khz:
+    if locked and if_khz and lo_khz is not None:  # oscillateur à 0 : entrée en bande L directe, IF = RF
         rf_khz, rf_measured = if_khz + lo_khz, True
     else:
         rf_khz = downlink_khz or None
@@ -332,7 +340,10 @@ class IrdClient:
             with open_url(xml_request(self.url, body), timeout=timeout_s or self.cfg.timeout_s) as resp:
                 if resp.status != 200:
                     raise IrdError(f"HTTP {resp.status}")
-                return resp.read()
+                try:
+                    return resp.read()
+                except TimeoutError as e:  # il a répondu, mais n'a pas fini d'envoyer à temps
+                    raise IrdError("IRD : réponse trop lente (délai dépassé pendant la lecture)") from e
         except urllib.error.HTTPError as e:
             if e.code == 503:
                 raise IrdBusy("IRD occupé (HTTP 503)") from e

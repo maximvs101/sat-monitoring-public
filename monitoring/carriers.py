@@ -54,6 +54,17 @@ def carrier_key(rf_khz: int, pol: str | None) -> str:
     return f"{rf_khz // 100}-{_pol_letter(pol)}"
 
 
+def unique_key(rf_khz: int, pol: str | None, used: set) -> str:
+    """Clé libre : à 100 kHz près, sinon 10 kHz puis 1 kHz près (« 125830.9-V ») pour deux porteuses très proches."""
+    for key in (carrier_key(rf_khz, pol), f"{rf_khz / 100:.1f}-{_pol_letter(pol)}", f"{rf_khz / 100:.2f}-{_pol_letter(pol)}"):
+        if key not in used:
+            return key
+    n = 2
+    while f"{rf_khz / 100:.2f}-{_pol_letter(pol)}-{n}" in used:
+        n += 1
+    return f"{rf_khz / 100:.2f}-{_pol_letter(pol)}-{n}"
+
+
 def default_name(rf_khz: int, pol: str | None) -> str:
     mhz = f"{rf_khz / 1000:,.1f}".replace(",", " ").replace(".", ",")
     return mhz if pol is None else f"{mhz} {_pol_letter(pol)}"
@@ -115,16 +126,21 @@ def group_carriers(tunings: dict, entries: tuple, previous: tuple | list = ()) -
             carriers.append(dict(rf_khz=rf_khz, polarization=e.polarization, symbol_rate=sr, roll_off=None,
                                  irds=(), name=e.name, manual=True))
 
+    # D'abord les clés reprises du calcul précédent, puis les nouvelles : deux porteuses n'ont jamais la même clé.
     used = set()
     for c in carriers:
-        c["key"] = carrier_key(c["rf_khz"], c["polarization"])
+        c["key"] = None
         for p in previous:
             # Même polarisation exacte : la clé la contient, une polarisation devenue connue change donc de clé.
             if p.key not in used and p.polarization == c["polarization"] \
                     and _close(p.rf_khz, p.symbol_rate, c["rf_khz"], c["symbol_rate"]):
                 c["key"] = p.key
+                used.add(p.key)
                 break
-        used.add(c["key"])
+    for c in carriers:
+        if c["key"] is None:
+            c["key"] = unique_key(c["rf_khz"], c["polarization"], used)
+            used.add(c["key"])
 
     return sorted((Carrier(key=c["key"],
                            name=c["name"] or default_name(c["rf_khz"], c["polarization"]),
@@ -160,7 +176,10 @@ def attach_markers(carriers: list, marker_freqs: dict, fsh_pol: str | None, nois
         else:
             noise.append(n)
     if noise_markers:
+        # Imposés par l'opérateur : ils mesurent le bruit, même dans la bande d'une porteuse (jamais les deux).
         noise = [n for n in noise_markers if n in marker_freqs]
+        by_carrier = {k: [n for n in v if n not in noise] for k, v in by_carrier.items()}
+        by_carrier = {k: v for k, v in by_carrier.items() if v}
     return MarkerMap({k: tuple(v) for k, v in by_carrier.items()}, tuple(noise), False, tuple(ambiguous))
 
 

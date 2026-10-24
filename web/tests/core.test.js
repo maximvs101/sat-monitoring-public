@@ -142,3 +142,23 @@ test("IRD sans nouvelles : ni « OK » ni valeurs figées quand le direct est co
   assert.deepEqual(core.irdStatus(ok, false, 0, true), ["SANS NOUVELLES", "aucune mesure reçue récemment", "idle"]);
   assert.deepEqual(core.irdStatus(ok, true, 0, true)[0], "INJOIGNABLE");  // l'état connu le plus précis l'emporte
 });
+
+test("clé de porteuse plus fine (deux porteuses très proches) : fréquence relue", () => {
+  assert.deepEqual(core.carrierKeyRef("125830.9-V"), { rf_khz: 12583090, polarization: "vertical" });
+  assert.deepEqual(core.carrierKeyRef("125830.95-?"), { rf_khz: 12583095, polarization: null });
+  assert.deepEqual(core.parseRoute("#/porteuse/125830.9-V").key, "125830.9-V");
+});
+
+test("BER à la française (virgule) comme les autres nombres", () => {
+  assert.equal(core.fmtBer(1.2e-5), "1,2e-5");
+  assert.equal(core.fmtBer(0), "< 1e-8");
+});
+
+test("clé à polarisation inconnue et deux porteuses V et H de même fréquence : pas de choix au hasard", () => {
+  const v = { key: "125830-V", rf_khz: 12_583_020, polarization: "vertical", symbol_rate: 7_200_000 };
+  const h = { key: "125830-H", rf_khz: 12_583_030, polarization: "horizontal", symbol_rate: 7_200_000 };
+  assert.equal(core.matchCarrier([v, h], { key: "125830-?" }), null);
+  assert.equal(core.matchCarrier([v], { key: "125830-?" }), v);  // une seule candidate : elle
+  const u = { key: "125830-?", rf_khz: 12_583_000, polarization: null, symbol_rate: 7_200_000 };
+  assert.equal(core.matchCarrier([v, h, u], { key: "125830-?" }), u);  // clé exacte d'abord
+});

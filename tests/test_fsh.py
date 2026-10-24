@@ -53,6 +53,14 @@ class FshTest(unittest.TestCase):
         self.assertNotIn("FSH-K40", str(ctx.exception))
         self.assertIn("pas de réponse à FREQ:SPAN?", str(ctx.exception))
 
+    def test_error_queue_check_is_short(self):
+        # FSH4 muet sur tout : la lecture de la file d'erreurs ne double pas la durée de l'échec.
+        _, c = self.make({}, timeout_s=1.0)
+        t0 = time.monotonic()
+        with self.assertRaises(FshError):
+            c.read_settings()
+        self.assertLess(time.monotonic() - t0, 1.7)
+
     def test_non_numeric_raises(self):
         _, c = self.make({**OK, "CALC:MARK1:Y?": "abc"})
         with self.assertRaises(FshError):
@@ -88,6 +96,16 @@ class FshTest(unittest.TestCase):
         srv, c = self.make(MULTI)
         self.assertEqual(c.read_settings(), FshSettings(span_hz=50e6, rbw_hz=300e3, markers=((1, 11.21e9), (4, 11.24e9))))
         self.assertEqual(srv.received[:2], ["FREQ:SPAN?", "BAND?"])
+
+    def test_marker_frequency_read_right_after_its_check(self):
+        # FSH4 V1.20 : :X? sur un marqueur éteint le rallume. Le délai entre « allumé ? » et :X? doit être le plus
+        # court possible : la fréquence de chaque marqueur est lue juste après son contrôle, pas après les six.
+        srv, c = self.make(MULTI)
+        c.read_settings()
+        cmds = srv.received
+        for i, cmd in enumerate(cmds):
+            if cmd.endswith(":X?"):
+                self.assertEqual(cmds[i - 1], cmd.replace(":X?", "?"), cmds)
 
     def test_reader_reads_active_markers(self):
         srv, c = self.make(MULTI)

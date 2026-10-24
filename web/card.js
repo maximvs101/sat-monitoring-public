@@ -28,7 +28,7 @@ const Card = (() => {
   }
 
   function build(serial, { onClick, hint = "" } = {}) {
-    const h = { serial, el: el("article", { className: "ird-card", tabIndex: 0, title: hint }) };
+    const h = { serial, el: el("article", { className: "ird-card", title: hint }) };
     h.hint = hint;
     h.dot = el("span", { className: "dot" });
     h.name = el("strong", { className: "ird-name" });
@@ -44,9 +44,17 @@ const Card = (() => {
     h.chart = el("div", { className: "ird-chart" }, h.chartTitle, h.spark, h.band, axis);
     h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub, h.values, h.chart);
     if (onClick) {
+      // Atteignable au clavier seulement si elle mène quelque part (Entrée ou Espace).
       h.el.classList.add("link");
+      h.el.tabIndex = 0;
+      h.el.setAttribute("role", "link");
       h.el.addEventListener("click", () => onClick(serial));
-      h.el.addEventListener("keydown", (e) => { if (e.key === "Enter") onClick(serial); });
+      h.el.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick(serial);
+        }
+      });
     }
     return h;
   }

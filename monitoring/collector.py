@@ -45,6 +45,11 @@ class DeviceLoop(threading.Thread):
         self._stopping = threading.Event()
         self._wake = threading.Event()
         self._replacement = None
+        self._replacement_lock = threading.Lock()
+
+    def replacement_pending(self) -> bool:
+        """Un changement d'appareil attend la prochaine itération : la lecture en cours vient de l'ancien."""
+        return self._replacement is not None
 
     def _now_ms(self) -> int:
         return int(self.clock() * 1000)
@@ -59,7 +64,8 @@ class DeviceLoop(threading.Thread):
 
     def step(self) -> float:
         """Une lecture ; renvoie l'attente avant la suivante (sans rattrapage)."""
-        replacement, self._replacement = self._replacement, None
+        with self._replacement_lock:
+            replacement, self._replacement = self._replacement, None
         if replacement is not None:
             # Changement d'appareil, appliqué ici : l'ancienne connexion est fermée entre deux lectures.
             if self.close is not None:
@@ -76,6 +82,8 @@ class DeviceLoop(threading.Thread):
                     self.close()
                 self._set_state(self._now_ms(), "paused", "")
             return PAUSED_POLL_S
+        # Pas en pause : la prochaine pause devra s'appliquer (même si une reprise est arrivée au mauvais moment).
+        self._pause_applied = False
         m0, t0 = self.timer(), self.clock()
         try:
             value = self.read()
@@ -97,7 +105,8 @@ class DeviceLoop(threading.Thread):
             self.on_sample(ts, value)
             if self.state != "up" and not self._paused.is_set():
                 self._set_state(ts, "up", "")
-            return wait
+            # Le traitement de la mesure (base, détection) compte dans la période : la cadence reste celle réglée.
+            return max(self.period_s - (self.timer() - m0), self.min_idle_s)
 
         self.failures += 1
         log.debug("%s : échec %d (%s)", self.device, self.failures, error)
@@ -124,7 +133,8 @@ class DeviceLoop(threading.Thread):
 
     def replace_reader(self, read: Callable[[], object], close: Callable[[], None] | None = None) -> None:
         """Change d'appareil ; la boucle l'applique à sa prochaine itération."""
-        self._replacement = (read, close)
+        with self._replacement_lock:
+            self._replacement = (read, close)
         self._wake.set()
 
     def resume(self) -> None:

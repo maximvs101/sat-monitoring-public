@@ -13,7 +13,9 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .ird import REFRESH_BODY, STATUS_BODY, IrdError, open_url, parse_refresh, xml_request
 
-INET = re.compile(r"inet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-fA-F]+)")  # ifconfig (Mac, Linux)
+# ifconfig : Mac (masque hexadécimal), Linux net-tools (masque pointé), ancien Linux (« inet addr: … Mask: … »).
+INET = re.compile(r"inet (?:addr:)?(\d+\.\d+\.\d+\.\d+)\s.*?(?:netmask|Mask:)\s*(0x[0-9a-fA-F]+|\d+\.\d+\.\d+\.\d+)")
+IP_ADDR = re.compile(r"inet (\d+\.\d+\.\d+\.\d+)/(\d+)")  # « ip -4 -o addr » (Linux sans ifconfig)
 IPV4 = re.compile(r":\s*(\d+\.\d+\.\d+\.\d+)")  # ipconfig (Windows)
 MIN_PREFIXLEN = 24  # un réseau plus large est réduit au /24 de la machine pour rester rapide
 
@@ -31,7 +33,9 @@ def _add_network(networks: list, addr: str, prefixlen: int) -> None:
 def parse_ifconfig(text: str) -> list:
     networks = []
     for addr, mask in INET.findall(text):
-        _add_network(networks, addr, bin(int(mask, 16)).count("1"))
+        prefixlen = (bin(int(mask, 16)).count("1") if mask.startswith("0x")
+                     else ipaddress.ip_network(f"0.0.0.0/{mask}").prefixlen)
+        _add_network(networks, addr, prefixlen)
     return networks
 
 
@@ -54,10 +58,23 @@ def parse_ipconfig(text: str) -> list:
 
 def local_networks() -> list:
     if sys.platform == "win32":
-        out = subprocess.run(["ipconfig"], capture_output=True, text=True, errors="replace", timeout=5).stdout
+        try:
+            out = subprocess.run(["ipconfig"], capture_output=True, text=True, errors="replace", timeout=5).stdout
+        except (OSError, subprocess.SubprocessError):
+            return []
         return parse_ipconfig(out)
-    out = subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=5).stdout
-    return parse_ifconfig(out)
+    try:
+        return parse_ifconfig(subprocess.run(["ifconfig"], capture_output=True, text=True, timeout=5).stdout)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:  # Linux récent sans net-tools
+        out = subprocess.run(["ip", "-4", "-o", "addr"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    networks = []
+    for addr, prefixlen in IP_ADDR.findall(out):
+        _add_network(networks, addr, int(prefixlen))
+    return networks
 
 
 def _port_open(host: str, port: int, timeout_s: float) -> bool:

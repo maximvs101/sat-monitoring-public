@@ -294,7 +294,8 @@ const PeriodSelector = (() => {
     const end = el("input", { type: "datetime-local", className: "input", value: localInput(custom ? to : Date.now()) });
     const apply = button("Afficher", () => {
       const a = new Date(start.value).getTime(), b = new Date(end.value).getTime();
-      if (a < b) onChange(`${a}-${b}`);
+      if (Number.isNaN(a) || Number.isNaN(b)) alert("Renseigner la date et l'heure de début et de fin.");
+      else if (a < b) onChange(`${a}-${b}`);
       else alert("La fin de la période doit suivre son début.");
     }, { small: true, primary: true });
     const form = el("div", { className: "period-form" }, el("span", { textContent: "du" }), start,

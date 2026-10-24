@@ -2,6 +2,7 @@ import tempfile
 import threading
 import time
 import unittest
+from unittest import mock
 from dataclasses import replace
 from pathlib import Path
 
@@ -234,6 +235,41 @@ class AppTest(unittest.TestCase):
         app._on_state(10**12, "ird:S1", "down", "IRD injoignable : timed out")
         self.assertEqual([e for e in app.store.events(0, 10**13) if e["ts_end"] is None], [])
         self.assertNotIn("ird:S1", app.detector.down_events)
+
+    def test_old_fsh_reading_after_change_is_ignored(self):
+        # Lecture de l'ancien FSH4 terminée après le changement d'appareil : pas de « réglage FSH4 modifié » quand le
+        # nouveau répond avec d'autres réglages.
+        app = self.make()
+        app.fsh_loop.step()
+        old = app.fsh_loop.read()
+        app.set_fsh("10.0.0.99", 5555, None)
+        app._on_marker(10**12, old)               # lecture de l'ancien appareil, arrivée en retard
+        app.fsh_loop._replacement = None           # le nouveau lecteur est en place
+        new = fsh({1: (11_220.8e6, -50.0)}, span=20e6)
+        app._on_marker(10**12 + 1000, new)
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["kind"] == "fsh_settings"], [])
+
+    def test_stale_carrier_list_not_published(self):
+        # Deux fils calculent les porteuses ; celui qui a la liste la plus ancienne ne doit ni la publier ni fermer
+        # les alertes des porteuses de la nouvelle.
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.step_irds(app)
+        old = app.carriers()
+        self.irds.samples["S1"] = sample(rf_khz=11_000_000)
+        self.step_irds(app)
+        published = []
+        app.bus.publish = published.append
+        app._publish_carriers_if_changed(old)
+        self.assertEqual([m for m in published if m["type"] == "carriers"], [])
+
+    def test_add_ird_not_tracked_when_config_cannot_be_saved(self):
+        # config.toml bloqué (antivirus sous Windows) : l'ajout échoue, et l'IRD n'est pas suivi en douce.
+        app = self.make()
+        with mock.patch("monitoring.app.save_irds", side_effect=PermissionError("config.toml verrouillé")):
+            with self.assertRaises(PermissionError):
+                app.add_ird("10.0.0.2")
+        self.assertNotIn("S2", app.ird_loops)
+        self.assertEqual(app.cfg.irds, ())
 
     def test_status_fsh_span_and_rbw(self):
         app = self.make()

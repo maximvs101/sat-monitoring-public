@@ -6,11 +6,13 @@
 
 const JournalPage = (() => {
   const CHOICES = [["24h", "24 h"], ["7j", "7 j"], ["30j", "30 j"]];
+  const MAX_ROWS = 500;  // au-delà, seuls les plus récents sont affichés (la page reste fluide)
   let route = null;
   let dom = null;
   let unsubscribe = null;
   let seq = 0;
   let events = [];
+  let periodCarriers = [];  // porteuses de la période, avec les périodes d'appartenance de chaque IRD
   let refresh = null;
 
   const period = () => route.period || "24h";
@@ -19,14 +21,18 @@ const JournalPage = (() => {
     location.hash = routeHref({ page: "journal", period: route.period, src: route.src, open: route.open, ...changes });
   }
 
-  // Une porteuse filtre ses propres événements et ceux des IRD qu'elle porte aujourd'hui.
+  // Une porteuse filtre ses propres événements et ceux des IRD qui étaient sur elle au moment de l'événement.
   function matches(ev) {
     if (route.open && ev.ts_end != null) return false;
     const src = route.src;
     if (!src) return true;
     if (src.startsWith("porteuse:")) {
-      const c = Store.state.carriers.find((x) => x.key === src.slice(9));
-      return ev.source === src || (!!c && ev.source?.startsWith("ird:") && c.irds.includes(ev.source.slice(4)));
+      if (ev.source === src) return true;
+      const key = src.slice(9);
+      const c = periodCarriers.find((x) => x.key === key) || Store.state.carriers.find((x) => x.key === key);
+      if (!c || !ev.source?.startsWith("ird:")) return false;
+      const serial = ev.source.slice(4);
+      return c.irds.includes(serial) && Charts.inPeriods(c, serial, ev.ts_start);
     }
     return ev.source === src;
   }
@@ -35,6 +41,10 @@ const JournalPage = (() => {
     const s = Store.state;
     const opts = [["", "Toutes les sources"]];
     for (const c of s.carriers) opts.push([`porteuse:${c.key}`, `Porteuse ${c.name}`]);
+    // Porteuses de la période qui n'existent plus aujourd'hui (ancien site, IRD re-réglé).
+    for (const c of periodCarriers) {
+      if (!s.carriers.some((x) => x.key === c.key)) opts.push([`porteuse:${c.key}`, `Porteuse ${c.name} (plus aujourd'hui)`]);
+    }
     const serials = new Set([...s.followed, ...events.filter((e) => e.source?.startsWith("ird:")).map((e) => e.source.slice(4))]);
     for (const serial of [...serials].sort((a, b) => (s.names[a] || a).localeCompare(s.names[b] || b, "fr", { numeric: true }))) {
       opts.push([`ird:${serial}`, s.names[serial] || serial]);
@@ -46,21 +56,10 @@ const JournalPage = (() => {
 
   async function onEventClick(ev) {
     const page = dom;  // page quittée pendant le chargement : pas de navigation
-    const pad = Store.state.cfg.event_padding_s * 1000;
-    let carriers = Store.state.carriers;
-    if (ev.source?.startsWith("ird:")) {
-      // Où était l'IRD à ce moment-là : porteuses recalculées autour de l'événement.
-      try {
-        carriers = (await Store.loadRange(ev.ts_start - pad, (ev.ts_end ?? Date.now()) + pad, 50)).carriers;
-      } catch (e) {
-        if (dom === page) showNotice(`Chargement impossible : ${e.message}`);
-        return;
-      }
-    }
+    const { target, message } = await eventDestination(ev);
     if (dom !== page) return;
-    const target = eventTarget(ev, carriers, Date.now(), pad);
     if (target) location.hash = routeHref(target);
-    else showNotice(`${eventSource(ev)} n'appartenait à aucune porteuse à ce moment-là : pas de page à ouvrir.`);
+    else showNotice(message);
   }
 
   function showNotice(text) {
@@ -69,8 +68,10 @@ const JournalPage = (() => {
   }
 
   function render() {
-    const shown = events.filter(matches);
-    dom.count.textContent = `${shown.length} événement${shown.length > 1 ? "s" : ""}`;
+    const matching = events.filter(matches);
+    const shown = matching.slice(0, MAX_ROWS);
+    dom.count.textContent = matching.length > MAX_ROWS ? `${MAX_ROWS} plus récents affichés sur ${matching.length} événements`
+      : `${matching.length} événement${matching.length > 1 ? "s" : ""}`;
     const options = sourceOptions();
     if (dom.source.dataset.sig !== JSON.stringify(options)) {
       dom.source.dataset.sig = JSON.stringify(options);
@@ -93,6 +94,12 @@ const JournalPage = (() => {
       events = [...byId.values()].sort((a, b) => b.ts_start - a.ts_start);
       dom.error.hidden = true;
       render();
+      // Porteuses de la période (qui était où), pour le filtre : chargées ensuite, la liste s'affiche sans attendre.
+      Store.loadRange(from, to, 50).then((past) => {
+        if (mine !== seq || !dom) return;
+        periodCarriers = past.carriers;
+        render();
+      }).catch(() => {});
     } catch (e) {
       if (mine !== seq || !dom) return;
       dom.error.hidden = false;

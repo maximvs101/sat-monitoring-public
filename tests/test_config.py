@@ -1,5 +1,6 @@
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 from monitoring.config import (CarrierEntry, Config, IrdEntry, load_config, save_carriers, save_detect, save_fsh,
@@ -29,6 +30,43 @@ class ConfigTest(unittest.TestCase):
         save_fsh(path, "10.0.0.8", 5555, None)
         self.assertEqual(load_config(path).fsh.host, "10.0.0.8")
         self.assertEqual(path.read_text(encoding="utf-8").count("[fsh]"), 1)
+
+    def test_invalid_values_refused_in_french(self):
+        for text, expected in (("[fsh]\nrate_hz = 0\n", "rate_hz"), ("[fsh]\nrate_hz = \"vite\"\n", "rate_hz"),
+                               ("[server]\nport = 70000\n", "port"), ("[fsh]\nhost = 12\n", "host"),
+                               ("[[carriers]]\nname = \"X\"\nmanual = true\n", "freq_mhz"),
+                               ("[[carriers]]\nname = \"X\"\nfreq_mhz = 99999999.0\nmanual = true\n", "freq_mhz")):
+            with self.assertRaises(ValueError, msg=text) as ctx:
+                load_config(write(text))
+            self.assertIn(expected, str(ctx.exception))
+
+    def test_spaced_section_header(self):
+        # « [ fsh ] » écrit à la main : enregistrer ne doit pas ajouter un second [fsh] (fichier illisible ensuite).
+        path = write("[ fsh ]\nhost = \"10.0.0.9\"\n")
+        save_fsh(path, "10.0.0.8", 5555, None)
+        self.assertEqual(load_config(path).fsh.host, "10.0.0.8")
+
+    def test_comments_between_blocks_kept(self):
+        path = write("[[irds]]\nserial = \"A\"\nname = \"IRD 1\"\nhost = \"10.0.0.1\"\n\n"
+                     "# Seuils réglés pour ce site\n[detect]\nmargin_drop_db = 2.0\n")
+        save_irds(path, (IrdEntry("A", "IRD 1", "10.0.0.2"),))
+        self.assertIn("# Seuils réglés pour ce site\n[detect]", path.read_text(encoding="utf-8"))
+
+    def test_write_retries_when_windows_holds_the_file(self):
+        # Antivirus ou indexeur qui garde config.toml ouvert un instant : le remplacement est retenté.
+        path = write("[fsh]\nhost = \"10.0.0.9\"\n")
+        real = Path.replace
+        calls = []
+
+        def flaky(self, target):
+            calls.append(1)
+            if len(calls) == 1:
+                raise PermissionError("fichier utilisé par un autre processus")
+            return real(self, target)
+
+        with mock.patch.object(Path, "replace", flaky):
+            save_fsh(path, "10.0.0.8", 5555, None)
+        self.assertEqual(load_config(path).fsh.host, "10.0.0.8")
 
     def test_override_one_key(self):
         cfg = load_config(write("[fsh]\nrate_hz = 2.0\n"))

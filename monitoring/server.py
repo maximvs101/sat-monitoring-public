@@ -19,7 +19,7 @@ from urllib.parse import parse_qs, unquote, urlsplit
 from . import system
 from .app import App, carrier_view
 from .carriers import Tuning, attach_markers, group_carriers
-from .config import POLARIZATIONS, CarrierEntry, load_config
+from .config import POLARIZATIONS, CarrierEntry, check_freq_mhz, load_config
 from .ird import IrdError
 
 log = logging.getLogger("monitoring")
@@ -61,6 +61,9 @@ def parse_fsh(body: dict) -> tuple:
     return host, port, _polarization(body.get("polarization"))
 
 
+REQUEST_TIMEOUT_S = 30
+
+
 def _name(value, message) -> str:
     """Nom d'IRD ou de porteuse, sans espaces autour ; vide refusé."""
     if not isinstance(value, str) or not value.strip():
@@ -70,9 +73,12 @@ def _name(value, message) -> str:
 
 def parse_carrier(body: dict) -> CarrierEntry:
     sr = body.get("symbol_rate_msps")
-    return CarrierEntry(_name(body.get("name"), "nom de porteuse manquant"), _number(body.get("freq_mhz"), "fréquence"),
-                        _polarization(body.get("polarization")), None if sr is None else _number(sr, "débit symbole"),
-                        True)
+    freq = check_freq_mhz(_number(body.get("freq_mhz"), "fréquence"))
+    rate = None if sr is None else _number(sr, "débit symbole")
+    if rate is not None and rate <= 0:
+        raise ValueError("débit symbole : nombre positif de MS/s attendu")
+    return CarrierEntry(_name(body.get("name"), "nom de porteuse manquant"), freq, _polarization(body.get("polarization")),
+                        rate, True)
 
 
 def parse_thresholds(body: dict) -> tuple:
@@ -115,11 +121,15 @@ def _int_param(params, name, default=None):
         if default is None:
             raise ValueError(f"paramètre {name} manquant")
         return default
-    return int(values[0])
+    value = int(values[0])
+    if not -2**63 <= value < 2**63:  # au-delà, SQLite refuse le nombre (erreur 500 sinon)
+        raise ValueError(f"paramètre {name} hors limites")
+    return value
 
 
 def make_server(app: App) -> ThreadingHTTPServer:
     class Handler(BaseHTTPRequestHandler):
+        timeout = REQUEST_TIMEOUT_S  # un client qui n'envoie pas toute sa requête ne bloque pas un fil pour toujours
         server_version = "monitoring-sat"
 
         def log_message(self, fmt, *args):
@@ -218,7 +228,7 @@ def make_server(app: App) -> ThreadingHTTPServer:
             if origin is None:
                 return True
             port = self.server.server_address[1]
-            return origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}")
+            return origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}", f"http://[::1]:{port}")
 
         def _read_json(self):
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
@@ -286,7 +296,11 @@ def make_server(app: App) -> ThreadingHTTPServer:
                     app.remove_ird(rest[0])
                     return self._send(204)
                 if kind == "carriers" and not rest:
-                    app.add_carrier(parse_carrier(body))
+                    entry = parse_carrier(body)
+                    try:
+                        app.add_carrier(entry)
+                    except ValueError as e:
+                        return self._error(409, str(e))
                     return self._send(201, b"{}")
                 if kind == "carriers" and len(rest) == 1:
                     app.set_carrier_name(rest[0], _name(body.get("name"), "nom de porteuse manquant"))
