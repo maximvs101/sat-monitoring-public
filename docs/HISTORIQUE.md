@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.1.0** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
+- Windows : versions publiées sur le dépôt public, dernière **v1.2.0** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.0, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
 ## À faire
 
@@ -31,6 +31,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Version v1.2.0** publiée sur le dépôt public (son des alertes) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.0 avec `MonitoringSat-Windows.zip` (10,6 Mo) et notes en français.
 - **Son des alertes dans la page** (première étape de la proposition de notifications) : alarme répétée pour une alerte critique jusqu'à « Acquitter » (bandeau rouge en haut de la page) ou sa fermeture, bip pour un avertissement, notification du navigateur en option, son coupable depuis le menu ; nouvelle page Réglages › Notifications (réglages propres à chaque navigateur). Sons fabriqués dans la page (Web Audio), aucun fichier. Vérifié sur la démo : alarme à chaque perte de lock, arrêt seul à la fermeture, plus de répétition après « Acquitter », rien quand le son est coupé.
 - **Version v1.1.0** publiée sur le dépôt public (lots 1 et 2) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0 avec `MonitoringSat-Windows.zip` (10,5 Mo) et notes en français.
 - **Lot 2 de corrections** (tous les autres points des revues, et les mineurs reportés depuis le 22/10) :
