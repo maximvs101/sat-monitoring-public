@@ -49,12 +49,13 @@ const OverviewPage = (() => {
       }
     }
     const [fshLabel, fshTone] = DEVICE_STATE[s.states.fsh] || [s.states.fsh || "en attente", ""];
-    const sig = JSON.stringify([up, s.followed.length, open.length, open.some((e) => e.severity === "critical"),
+    const sig = JSON.stringify([s.connected, up, s.followed.length, open.length, open.some((e) => e.severity === "critical"),
       low && [low.v, low.serial], s.states.fsh, s.names]);
     if (sig === sigs.kpis) return;
     sigs.kpis = sig;
     dom.kpis.replaceChildren(
-      kpi("IRD en service", `${up} / ${s.followed.length}`, { tone: up < s.followed.length ? "bad" : "" }),
+      s.connected ? kpi("IRD en service", `${up} / ${s.followed.length}`, { tone: up < s.followed.length ? "bad" : "" })
+        : kpi("IRD en service", "—", { small: "connexion perdue" }),
       kpi("Alertes en cours", String(open.length),
         { tone: open.some((e) => e.severity === "critical") ? "bad" : open.length ? "warn" : "" }),
       kpi("Marge la plus basse", low ? fmt(low.v, 1, "dB") : "—", { small: low ? s.names[low.serial] || low.serial : "" }),

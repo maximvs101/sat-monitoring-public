@@ -5,6 +5,7 @@
 // des cartes à leur nombre.
 
 const Card = (() => {
+  const STALE_MS = 10_000;
   // Carte de référence (échelle 1), complète puis compacte ; sous l'échelle minimale de la compacte, la page défile.
   const BASE_W = 300, GAP = 12, MAX_SCALE = 2.2;
   const FULL = { h: 290, min: 0.85 }, COMPACT = { h: 195, min: 0.75 };
@@ -157,10 +158,12 @@ const Card = (() => {
   function update(h, data) {
     const { latest: m, down, series: d, carrier, openAlerts = 0, cfg, range, scale = 1, compact = false } = data;
     const minimum = cfg.margin_min_db;
-    const [title, why, code] = irdStatus(m, down, minimum);
+    // Direct coupé, ou plus de mesure depuis STALE_MS : la dernière mesure n'est plus l'état de l'IRD.
+    const seen = Store.state.seen[`ird:${h.serial}`];
+    const stale = !Store.state.connected || (seen != null && Date.now() - seen > STALE_MS);
+    const [title, why, code] = irdStatus(m, down, minimum, stale);
     setTone(h, code);
     h.dot.className = `dot ${{ up: "ok", down: "bad" }[data.deviceState] || ""}`;
-    const seen = Store.state.seen[`ird:${h.serial}`];
     h.dot.title = [(DEVICE_STATE[data.deviceState] || ["en attente"])[0],
       data.deviceState === "down" ? Store.state.details[`ird:${h.serial}`] : "",
       seen ? `dernière mesure ${fmtTime(seen)}` : "aucune mesure"].filter(Boolean).join(" · ");
@@ -171,7 +174,7 @@ const Card = (() => {
     h.why.textContent = [cause, openAlerts ? `${openAlerts} alerte${openAlerts > 1 ? "s" : ""} en cours` : ""].filter(Boolean).join(" · ");
     h.el.title = [h.why.textContent, h.hint].filter(Boolean).join("\n");
     h.sub.textContent = [m?.service_name, carrier ? `porteuse ${carrier.name}` : null].filter(Boolean).join(" · ") || "—";
-    const live = m && !down;
+    const live = m && !down && !stale;
     const thr = dropThreshold(d, cfg);
     const limits = [thr > 0 ? `chute si < ${fmt(thr, 1, "dB")}` : "", minimum > 0 ? `min. ${fmt(minimum, 1, "dB")}` : ""]
       .filter(Boolean).join(" · ");

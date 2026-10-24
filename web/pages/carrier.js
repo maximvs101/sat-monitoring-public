@@ -165,7 +165,8 @@ const CarrierPage = (() => {
     if (!d) return { ts: [], margin_db: [], state: [] };
     const keep = d.ts.map((t) => Charts.inPeriods(carrier, serial, t));
     const pick = (a) => a.filter((_, i) => keep[i]);
-    return { ts: pick(d.ts), margin_db: pick(d.margin_min || d.margin_db), state: pick(d.state) };
+    return { ts: pick(d.ts), margin_db: pick(d.margin_min || d.margin_db), state: pick(d.state),
+      state_ms: d.state_ms ? pick(d.state_ms) : undefined };
   }
 
   function renderSections(events) {

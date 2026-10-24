@@ -21,6 +21,15 @@ class ConfigTest(unittest.TestCase):
         self.assertEqual(cfg.detect.ber_threshold, 1e-6)
         self.assertEqual(cfg.server.host, "127.0.0.1")
 
+    def test_bom_from_windows_notepad(self):
+        # Bloc-notes de Windows : « UTF-8 avec BOM ». Le fichier doit se lire et s'enregistrer quand même.
+        path = write("")
+        path.write_bytes("\ufeff[fsh]\nhost = \"10.0.0.9\"\n".encode("utf-8"))
+        self.assertEqual(load_config(path).fsh.host, "10.0.0.9")
+        save_fsh(path, "10.0.0.8", 5555, None)
+        self.assertEqual(load_config(path).fsh.host, "10.0.0.8")
+        self.assertEqual(path.read_text(encoding="utf-8").count("[fsh]"), 1)
+
     def test_override_one_key(self):
         cfg = load_config(write("[fsh]\nrate_hz = 2.0\n"))
         self.assertEqual(cfg.fsh.rate_hz, 2.0)

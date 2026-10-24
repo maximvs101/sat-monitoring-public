@@ -38,3 +38,58 @@ test("les mesures du direct ne redessinent qu'une fois par seconde (au plus)", a
   intervals[0].fn();
   assert.deepStrictEqual(kinds.filter((k) => k !== "reload"), ["tick"]);
 });
+
+// Service simulé : chaque requête attend que le test la libère (chargement en cours).
+function fakeService() {
+  const calls = [];
+  const counts = { status: 0 };
+  const fetchImpl = (url) => new Promise((resolve) => {
+    if (url.startsWith("/api/status")) counts.status++;
+    calls.push({ url, resolve: (body) => resolve({ ok: true, status: 200, json: async () => body }) });
+  });
+  const answer = async (events = []) => {
+    // Répond aux requêtes en attente, dans l'ordre : statut, puis séries et événements.
+    while (calls.length) {
+      const c = calls.shift();
+      if (c.url.startsWith("/api/status")) {
+        c.resolve({ now: 100_000, config: { live_window_min: 10, max_points: 5000, event_padding_s: 30 }, carriers: [],
+          marker_map: { noise: [], if_warning: false }, irds: {}, fsh: { state: "up" }, devices: {} });
+      } else if (c.url.startsWith("/api/series")) {
+        c.resolve({ fsh: {}, irds: {}, names: {} });
+      } else {
+        c.resolve(events);
+      }
+      await new Promise((r) => setImmediate(r));
+    }
+  };
+  return { fetchImpl, calls, answer, counts };
+}
+
+test("une alerte fermée pendant un rechargement reste fermée", async () => {
+  const srv = fakeService();
+  const { Store, sources } = loadStore(srv.fetchImpl);
+  const started = Store.start();
+  await srv.answer([{ id: 5, kind: "lock_lost", ts_start: 90_000, ts_end: null }]);
+  await started;
+  Store.reload();  // rechargement (marqueur déplacé…) : instantané des événements pris avant la fermeture
+  await new Promise((r) => setImmediate(r));
+  sources[0].onmessage({ data: JSON.stringify({ type: "event", id: 5, kind: "lock_lost", ts_start: 90_000, ts_end: 95_000 }) });
+  await srv.answer([{ id: 5, kind: "lock_lost", ts_start: 90_000, ts_end: null }]);
+  assert.strictEqual(Store.state.events.get(5).ts_end, 95_000);
+});
+
+test("un rechargement demandé pendant un autre n'est pas perdu", async () => {
+  const srv = fakeService();
+  const { Store } = loadStore(srv.fetchImpl);
+  const started = Store.start();
+  await srv.answer();
+  await started;
+  Store.reload();
+  await new Promise((r) => setImmediate(r));
+  Store.reload();  // porteuse apparue pendant le premier rechargement
+  await srv.answer();
+  await srv.answer();
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(srv.calls.length, 0);  // plus rien en attente
+  assert.strictEqual(srv.counts.status, 3);  // démarrage, rechargement, rechargement redemandé
+});

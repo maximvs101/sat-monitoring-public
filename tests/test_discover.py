@@ -1,4 +1,5 @@
 import ipaddress
+import socket
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -81,6 +82,32 @@ class FakeIrdHttp:
         self.httpd.server_close()
 
 
+class NotHttp:
+    """Port 80 d'un appareil qui ne parle pas HTTP (caméra, automate…) : une bannière puis la fermeture."""
+
+    def __init__(self):
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen()
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._serve, daemon=True).start()
+
+    def _serve(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            try:
+                conn.recv(4096)
+                conn.sendall(b"SSH-2.0-OpenSSH_8.0\r\n")
+            finally:
+                conn.close()
+
+    def stop(self):
+        self.sock.close()
+
+
 class DiscoverTest(unittest.TestCase):
     def test_parse_ifconfig(self):
         nets = parse_ifconfig(IFCONFIG)
@@ -108,6 +135,11 @@ class DiscoverTest(unittest.TestCase):
         srv = FakeScpi({})
         self.addCleanup(srv.stop)
         self.assertIsNone(probe_fsh("127.0.0.1", srv.port, timeout_s=0.2))
+
+    def test_probe_ird_not_http(self):
+        srv = NotHttp()
+        self.addCleanup(srv.stop)
+        self.assertIsNone(probe_ird("127.0.0.1", srv.port, timeout_s=1.0))
 
     def test_probe_ird(self):
         srv = FakeIrdHttp()

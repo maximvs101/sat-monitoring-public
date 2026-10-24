@@ -1,6 +1,8 @@
+import os
 import threading
 import time
 import unittest
+from unittest import mock
 from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -122,6 +124,16 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(body, b"xml=<refresh/>")
         self.assertEqual(ctype, "text/plain; charset=utf-8")
 
+    def test_fetch_ignores_system_proxy(self):
+        # PC d'entreprise avec proxy : les IRD du réseau local ne doivent jamais passer par lui.
+        srv = FakeIrd()
+        self.addCleanup(srv.stop)
+        # urllib ne contourne le proxy que pour la boucle locale : le faux IRD est traité comme une adresse du réseau.
+        with mock.patch.dict(os.environ, {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9",
+                                          "no_proxy": "", "NO_PROXY": ""}), \
+                mock.patch("urllib.request.proxy_bypass", lambda host: False):
+            self.assertIsInstance(IrdClient(srv.host, IrdConfig()).fetch(), IrdSample)
+
     def test_fetch_timeout_raises(self):
         srv = FakeIrd(delay_s=0.5)
         self.addCleanup(srv.stop)
@@ -214,6 +226,7 @@ class DecodeTest(unittest.TestCase):
         self.assertIsNone(s.modcod)
         self.assertIsNone(s.roll_off)
         self.assertEqual((s.margin_db, s.cn_db), (0.0, 0.0))  # 0 dB = décrochage, voulu
+        self.assertEqual((s.ber, s.ber_raw), (None, None))  # 0 n'est pas « < 1e-8 » : pas de mesure
 
     def test_unlocked_has_no_stale_decoding(self):
         # Sans flux transport, voies audio « actives » et débits vidéo sont ceux d'avant la coupure.

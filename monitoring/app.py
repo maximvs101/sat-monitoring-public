@@ -415,9 +415,13 @@ class App:
         self._publish_events(events)
 
     def _on_state(self, ts, device, state, detail):
-        log.info("%s : %s %s", device.upper(), state, detail)
-        self.store.add_status(ts, device, state, detail)
         with self._detect_lock:
+            # Lecture terminée après le retrait de l'IRD (un IRD injoignable met longtemps à échouer) : rien ne doit
+            # renaître, ni état ni « injoignable » que plus rien ne fermerait.
+            if device.startswith("ird:") and device[4:] not in self.ird_loops:
+                return
+            log.info("%s : %s %s", device.upper(), state, detail)
+            self.store.add_status(ts, device, state, detail)
             events = self.detector.on_state(ts, device, state, detail)
         self.bus.publish({"type": "state", "ts": ts, "device": device, "state": state, "detail": detail})
         self._publish_events(events)
@@ -474,11 +478,14 @@ class App:
             log.info("Purge des données de plus de %d jour(s)", days)
 
     def _purge_loop(self):
-        while not self._stopping.wait(PURGE_EVERY_S):
+        # Première purge dès le démarrage, mais dans ce fil : une grosse purge ne retarde pas la collecte.
+        while True:
             try:
                 self.purge()
             except Exception:
                 log.exception("Échec de la purge")
+            if self._stopping.wait(PURGE_EVERY_S):
+                return
 
     def _close_open_events(self) -> int:
         """Événements restés ouverts (arrêt du service) : fermés à la dernière mesure enregistrée."""
@@ -489,7 +496,6 @@ class App:
         n = self._close_open_events()
         if n:
             log.info("%d événement(s) resté(s) ouvert(s) fermé(s) à la dernière mesure", n)
-        self.purge()
         if self.cfg.paths.retention_days > 0:
             self._purger.start()
         self._started = True

@@ -1,4 +1,6 @@
 import tempfile
+import threading
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -225,6 +227,14 @@ class AppTest(unittest.TestCase):
         self.assertEqual([e for e in app.store.events(0, 10**13) if e["ts_end"] is None], [])
         self.assertNotIn("S1", app.tunings)
 
+    def test_down_after_removal_leaves_no_orphan(self):
+        # Un IRD injoignable qu'on retire : sa dernière lecture (en échec) se termine après le retrait.
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        app.remove_ird("S1")
+        app._on_state(10**12, "ird:S1", "down", "IRD injoignable : timed out")
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["ts_end"] is None], [])
+        self.assertNotIn("ird:S1", app.detector.down_events)
+
     def test_status_fsh_span_and_rbw(self):
         app = self.make()
         self.assertEqual((app.status()["fsh"]["span_hz"], app.status()["fsh"]["rbw_hz"]), (None, None))
@@ -370,12 +380,32 @@ class AppTest(unittest.TestCase):
         app.start()
         self.assertEqual(app.store.events(0, 10**13)[0]["ts_end"], 1000)
 
-    def test_start_purges_old_data(self):
+    def test_start_purges_old_data_in_background(self):
+        # Une grosse purge (passage de « tout garder » à 30 jours sur un an de mesures) ne doit pas retarder la
+        # collecte : elle se fait dans le fil de purge, dès le démarrage.
         app = self.make()
         app.store.add_ird(1000, "S1", sample())
         app.cfg = replace(app.cfg, paths=replace(app.cfg.paths, retention_days=1))
+        release, started = threading.Event(), threading.Event()
+        original = app.store.purge_before
+
+        def slow_purge(ts):
+            started.set()
+            release.wait(5)
+            original(ts)
+
+        app.store.purge_before = slow_purge
+        t0 = time.monotonic()
         app.start()
-        self.assertEqual(app.store._all("SELECT COUNT(*) FROM ird_sat")[0][0], 0)
+        self.assertLess(time.monotonic() - t0, 1.0)
+        self.assertTrue(app.fsh_loop.is_alive())
+        self.assertTrue(started.wait(2))
+        release.set()
+        for _ in range(50):
+            if app.store._all("SELECT COUNT(*) FROM ird_sat WHERE ts = 1000")[0][0] == 0:
+                break
+            time.sleep(0.05)
+        self.assertEqual(app.store._all("SELECT COUNT(*) FROM ird_sat WHERE ts = 1000")[0][0], 0)
 
 
 if __name__ == "__main__":

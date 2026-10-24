@@ -130,3 +130,15 @@ test("périodes : clés héritées refusées, isFixedPeriod", () => {
   assert.strictEqual(isFixedPeriod("1-2"), false);
   assert.strictEqual(isFixedPeriod(undefined), false);
 });
+
+test("résumé d'une période agrégée : durées réelles de chaque état (pas l'intervalle entier)", () => {
+  // 30 jours : intervalles de 29 min ; une perte de lock de 2 s ne compte que 2 s.
+  const series = { ts: [0, 60_000], margin_db: [5, 6], state: [3, 0], state_ms: [[58_000, 0, 0, 2_000], [60_000, 0, 0, 0]] };
+  assert.deepEqual(core.periodSummary(series, []).state_ms, { 0: 118_000, 1: 0, 2: 0, 3: 2_000 });
+});
+
+test("IRD sans nouvelles : ni « OK » ni valeurs figées quand le direct est coupé", () => {
+  const ok = { locked: true, ts_locked: true, video_active: true, margin_db: 7, state: 0 };
+  assert.deepEqual(core.irdStatus(ok, false, 0, true), ["SANS NOUVELLES", "aucune mesure reçue récemment", "idle"]);
+  assert.deepEqual(core.irdStatus(ok, true, 0, true)[0], "INJOIGNABLE");  // l'état connu le plus précis l'emporte
+});

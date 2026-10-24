@@ -120,9 +120,13 @@ def _entries(cls, name, items):
     return out
 
 
+def _read_text(path: Path) -> str:
+    """Contenu de config.toml, sans le BOM qu'ajoute le Bloc-notes de Windows (« UTF-8 avec BOM »)."""
+    return path.read_text(encoding="utf-8").removeprefix("\ufeff")
+
+
 def load_config(path: str | Path) -> Config:
-    with open(path, "rb") as f:
-        data = tomllib.load(f)
+    data = tomllib.loads(_read_text(Path(path)))
     defaults = {f.name: f.default_factory for f in fields(Config) if f.name in SECTIONS}
     unknown = set(data) - set(defaults) - {"irds", "carriers"}
     if unknown:
@@ -220,7 +224,7 @@ def _write(path: Path, text: str) -> None:
 def save_fsh(path: str | Path, host: str, port: int, polarization: str | None) -> None:
     """Enregistre l'adresse du FSH4 et la polarisation de son entrée."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = _read_text(path)
     text = _set_key(text, "fsh", "host", _toml(host))
     text = _set_key(text, "fsh", "port", str(int(port)))
     text = (_set_key(text, "fsh", "polarization", _toml(polarization)) if polarization
@@ -231,7 +235,7 @@ def save_fsh(path: str | Path, host: str, port: int, polarization: str | None) -
 def save_detect(path: str | Path, margin_drop_db: float, margin_min_db: float) -> None:
     """Enregistre les seuils de marge réglés depuis la page."""
     path = Path(path)
-    text = path.read_text(encoding="utf-8")
+    text = _read_text(path)
     text = _set_key(text, "detect", "margin_drop_db", repr(float(margin_drop_db)))
     text = _set_key(text, "detect", "margin_min_db", repr(float(margin_min_db)))
     _write(path, text)
@@ -240,7 +244,7 @@ def save_detect(path: str | Path, margin_drop_db: float, margin_min_db: float) -
 def save_irds(path: str | Path, irds: tuple) -> None:
     """Réécrit la liste [[irds]] (et retire l'ancienne clé url de [ird])."""
     path = Path(path)
-    text = _remove_key(path.read_text(encoding="utf-8"), "ird", "url")
+    text = _remove_key(_read_text(path), "ird", "url")
     blocks = [_block({"serial": e.serial, "name": e.name, "host": e.host, "polarization": e.polarization})
               for e in irds]
     _write(path, _replace_blocks(text, "irds", blocks))
@@ -252,4 +256,4 @@ def save_carriers(path: str | Path, carriers: tuple) -> None:
     blocks = [_block({"name": c.name, "freq_mhz": float(c.freq_mhz), "polarization": c.polarization,
                       "symbol_rate_msps": None if c.symbol_rate_msps is None else float(c.symbol_rate_msps),
                       "manual": c.manual}) for c in carriers]
-    _write(path, _replace_blocks(path.read_text(encoding="utf-8"), "carriers", blocks))
+    _write(path, _replace_blocks(_read_text(path), "carriers", blocks))

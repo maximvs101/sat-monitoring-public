@@ -110,9 +110,14 @@ function matchCarrier(carriers, ref) {
 
 // Marge minimale, durée passée dans chaque code de la bande « État », nombre d'alertes. Chaque mesure compte
 // jusqu'à la suivante, sauf au-delà d'un trou (coupure) : au plus deux fois l'intervalle habituel, 3 s au moins.
+// Série agrégée : le service donne le temps réel passé dans chaque code par intervalle (state_ms), à additionner.
 function periodSummary(series, events) {
   const state_ms = { 0: 0, 1: 0, 2: 0, 3: 0 };
   const margins = series.margin_db.filter((v) => v != null);
+  if (series.state_ms) {
+    for (const bucket of series.state_ms) for (let k = 0; k < 4; k++) state_ms[k] += bucket[k];
+    return { margin_min: margins.length ? Math.min(...margins) : null, state_ms, alerts: events.length };
+  }
   const steps = series.ts.slice(1).map((t, i) => t - series.ts[i]).sort((a, b) => a - b);
   const maxGap = Math.max(3000, 2 * (steps[Math.floor(steps.length / 2)] || 0));
   for (let i = 0; i + 1 < series.ts.length; i++) {
@@ -125,9 +130,11 @@ function periodSummary(series, events) {
 
 // --- État d'un IRD en clair : [titre du badge, cause, code de couleur (0 à 3, « down » ou « idle »)] ---
 
-function irdStatus(m, down, minimum) {
+// `stale` : direct coupé ou plus de mesure depuis un moment ; la dernière mesure n'est plus l'état de l'IRD.
+function irdStatus(m, down, minimum, stale = false) {
   if (down) return ["INJOIGNABLE", "l'IRD ne répond plus", "down"];
   if (!m) return ["EN ATTENTE", "pas encore de mesure", "idle"];
+  if (stale) return ["SANS NOUVELLES", "aucune mesure reçue récemment", "idle"];
   const code = m.state ?? 0;
   if (!m.locked) return ["LOCK PERDU", "plus de signal démodulé", code];
   if (!m.ts_locked) return ["LOCK TS PERDU", "flux transport non verrouillé", code];

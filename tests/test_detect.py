@@ -274,6 +274,21 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(ev["detail"], "IRD 1 seul en défaut sur 12 583,0 V (IRD 2 normal) — cause probable : équipement ou câblage")
         self.assertEqual((ev["severity"], ev["source"]), ("warning", "ird:A"))
 
+    def test_alone_waits_3s_after_common_outage(self):
+        # Coupure commune (pluie…) : les deux IRD décrochent, B reverrouille une seconde avant A. A n'est « seul en
+        # défaut » que depuis 1 s : pas d'alerte « équipement ou câblage » pour autant.
+        for _ in range(10):
+            self.step(ird(locked=False), ird(locked=False))
+        self.step(ird(locked=False), ird())
+        self.step(ird(), ird())
+        self.assertEqual(self.alone(open_only=False), [])
+        # Seul en défaut pendant 3 s d'affilée : là, oui.
+        for _ in range(3):
+            self.step(ird(locked=False), ird())
+        self.assertEqual(self.alone(open_only=False), [])
+        self.step(ird(locked=False), ird())
+        self.assertEqual(len(self.alone()), 1)
+
     def test_alone_closes_when_other_degrades(self):
         for _ in range(5):
             self.step(ird(ber=1e-4), ird())

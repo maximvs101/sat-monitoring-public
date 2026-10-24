@@ -50,10 +50,13 @@ const FshPage = (() => {
     return map;
   }
 
-  function stats(levels) {
-    const v = (levels || []).filter((x) => x != null);
+  // Sur une période agrégée, le minimum et le maximum viennent des extrêmes de chaque intervalle (pas des moyennes).
+  function stats(fsh, n) {
+    const v = (fsh.levels[n] || []).filter((x) => x != null);
     if (!v.length) return null;
-    return { min: Math.min(...v), max: Math.max(...v), avg: v.reduce((a, b) => a + b, 0) / v.length };
+    const lo = ((fsh.levelsMin || {})[n] || fsh.levels[n]).filter((x) => x != null);
+    const hi = ((fsh.levelsMax || {})[n] || fsh.levels[n]).filter((x) => x != null);
+    return { min: Math.min(...lo), max: Math.max(...hi), avg: v.reduce((a, b) => a + b, 0) / v.length };
   }
 
   function renderCharts() {
@@ -81,7 +84,7 @@ const FshPage = (() => {
     for (const c of Object.values(charts)) if (c) { c.setData(fsh); c.setRange(from, to); }
     // Tableau des marqueurs : fréquence, porteuse, niveaux sur la période.
     const rows = all.map((n) => {
-      const st = stats(fsh.levels[n]);
+      const st = stats(fsh, n);
       return [`M${n}`, fsh.freqs[n] == null ? "—" : `${fmtMhz(fsh.freqs[n] / 1000)} MHz`, own[n] || "sans porteuse",
         st ? fmt(st.min, 1, "dBm") : "—", st ? fmt(st.avg, 1, "dBm") : "—", st ? fmt(st.max, 1, "dBm") : "—"];
     });

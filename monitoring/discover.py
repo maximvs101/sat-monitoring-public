@@ -1,5 +1,6 @@
 """Recherche du FSH4 et des IRD Ateme sur les réseaux locaux de la machine (lecture seule)."""
 
+import http.client
 import ipaddress
 import re
 import socket
@@ -10,7 +11,7 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
-from .ird import REFRESH_BODY, STATUS_BODY, IrdError, parse_refresh, xml_request
+from .ird import REFRESH_BODY, STATUS_BODY, IrdError, open_url, parse_refresh, xml_request
 
 INET = re.compile(r"inet (\d+\.\d+\.\d+\.\d+) netmask (0x[0-9a-fA-F]+)")  # ifconfig (Mac, Linux)
 IPV4 = re.compile(r":\s*(\d+\.\d+\.\d+\.\d+)")  # ipconfig (Windows)
@@ -88,7 +89,7 @@ def probe_fsh(host: str, port: int = 5555, timeout_s: float = 0.5) -> dict | Non
 
 
 def _post(url: str, body: bytes, timeout_s: float) -> bytes:
-    with urllib.request.urlopen(xml_request(url, body), timeout=timeout_s) as resp:
+    with open_url(xml_request(url, body), timeout=timeout_s) as resp:
         return resp.read()
 
 
@@ -107,7 +108,7 @@ def probe_ird(host: str, port: int = 80, timeout_s: float = 1.0) -> dict | None:
     url = f"http://{host}/xml-rpc" if port == 80 else f"http://{host}:{port}/xml-rpc"
     try:
         root = ET.fromstring(_post(url, STATUS_BODY, timeout_s))
-    except (urllib.error.URLError, OSError, ET.ParseError):
+    except (urllib.error.URLError, OSError, ET.ParseError, http.client.HTTPException):  # port 80 qui ne parle pas HTTP
         return None
     if root.findtext("system/vendorName", "").strip() != "Ateme":
         return None
@@ -117,7 +118,7 @@ def probe_ird(host: str, port: int = 80, timeout_s: float = 1.0) -> dict | None:
              "model": root.findtext("system/modelName", "").strip()}
     try:
         found["input"] = _describe_input(_post(url, REFRESH_BODY, timeout_s * 3))
-    except (urllib.error.URLError, OSError, ET.ParseError, IrdError, ValueError):
+    except (urllib.error.URLError, OSError, ET.ParseError, http.client.HTTPException, IrdError, ValueError):
         found["input"] = "entrée inconnue"
     return found
 

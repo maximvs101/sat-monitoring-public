@@ -1,6 +1,8 @@
 import tempfile
-from dataclasses import replace
+import threading
+import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from monitoring.fsh import MarkerSample
@@ -40,6 +42,17 @@ class StoreTest(unittest.TestCase):
         for lo, avg, hi in zip(s["margin_db_min"], s["margin_db"], s["margin_db_max"]):
             self.assertLessEqual(lo, avg)
             self.assertLessEqual(avg, hi)
+
+    def test_aggregated_state_durations(self):
+        # 30 jours ≈ intervalles de 29 min : une perte de lock de 2 s doit compter 2 s, pas tout l'intervalle.
+        for i in range(600):
+            self.store.add_ird(i * 1000, "A", ird(locked=i not in (100, 101)))
+        s = self.store.series("ird_sat", ["state"], 0, 600_000, 2, ird="A")
+        self.assertTrue(s["aggregated"])
+        totals = [sum(b[k] for b in s["state_ms"]) for k in range(4)]
+        self.assertEqual(totals[3], 2000)
+        self.assertEqual(totals[0], 597_000)  # 599 intervalles d'1 s, dont 2 perdus
+        self.assertEqual(len(s["state_ms"]), len(s["ts"]))
 
     def test_lock_aggregates_to_min(self):
         for i in range(200):
@@ -103,11 +116,14 @@ class StoreTest(unittest.TestCase):
 
     def test_reads_do_not_block_writes(self):
         import threading
-        with self.store._read_lock:  # une lecture longue en cours
+        held = self.store._pool.get()  # une lecture longue en cours
+        try:
             t = threading.Thread(target=self.store.add_marker, args=(1, MarkerSample(11.2e9, -40.0)))
             t.start()
             t.join(0.5)
             self.assertFalse(t.is_alive(), "l'écriture attend la lecture")
+        finally:
+            self.store._pool.put(held)
 
     def test_purge_before(self):
         for ts in (1000, 9000):
@@ -185,10 +201,14 @@ class ContentionTest(unittest.TestCase):
         import threading
         event_id = self.store.open_event(1000, "lock_lost", "critical", "x", "ird:A")
         done = []
-        with self.store._read_lock:  # une longue requête d'historique en cours
+        held = [self.store._pool.get() for _ in self.store._readers]  # toutes les lectures occupées
+        try:
             t = threading.Thread(target=lambda: done.append(self.store.event(event_id)))
             t.start()
             t.join(1)
+        finally:
+            for conn in held:
+                self.store._pool.put(conn)
         self.assertTrue(done, "la relecture d'un événement attend la requête d'historique")
 
     def test_latest_uses_indexes(self):
@@ -198,18 +218,71 @@ class ContentionTest(unittest.TestCase):
         self.store.add_ird(1000, "A", ird())
         self.store.add_health(1000, "A", IrdHealth(48, 42, False, False, False))
         queries = []
-        self.store._reader.set_trace_callback(queries.append)
+        for conn in self.store._readers:
+            conn.set_trace_callback(queries.append)
         latest = self.store.latest()
-        self.store._reader.set_trace_callback(None)
+        for conn in self.store._readers:
+            conn.set_trace_callback(None)
+        reader = self.store._readers[0]
         self.assertEqual((latest["marker"]["level_dbm"], sorted(latest["markers"]), list(latest["irds"])), (-50.0, [1, 4], ["A"]))
         full_scans = []
         for q in queries:
-            for row in self.store._reader.execute("EXPLAIN QUERY PLAN " + q):
+            for row in reader.execute("EXPLAIN QUERY PLAN " + q):
                 detail = row[-1]
                 if detail.startswith(("SCAN fsh_marker", "SCAN ird_sat", "SCAN ird_health")):
                     full_scans.append((q, detail))
         self.assertEqual(full_scans, [])
 
+
+    def _plans(self, conns, fn):
+        """Plans d'exécution des requêtes passées par les connexions `conns` pendant fn()."""
+        queries = []
+        for c in conns:
+            c.set_trace_callback(queries.append)
+        try:
+            fn()
+        finally:
+            for c in conns:
+                c.set_trace_callback(None)
+        conn = conns[0]
+        return [(q, row[-1]) for q in queries if q.lstrip().upper().startswith(("SELECT", "DELETE", "WITH"))
+                for row in conn.execute("EXPLAIN QUERY PLAN " + q)]
+
+    def test_history_reads_only_indexes(self):
+        # 30 jours de FSH4 à 4 Hz : des dizaines de millions de lignes. L'historique doit se lire dans les index
+        # (couvrants), sans parcourir la table ni chercher les marqueurs présents dans toute la plage.
+        for i in range(50):
+            for n in (1, 4):
+                self.store.add_marker(1000 * i, MarkerSample(11_220.8e6, -50.0), n=n)
+            self.store.add_ird(1000 * i, "A", ird())
+        plans = self._plans(self.store._readers, lambda: (self.store.marker_series(0, 10**6, 10),
+                                                          self.store.ird_series(0, 10**6, 10)))
+        bad = [(q, d) for q, d in plans if d.startswith(("SCAN fsh_marker", "SCAN ird_sat"))
+               or (d.startswith(("SEARCH fsh_marker", "SEARCH ird_sat")) and "COVERING INDEX" not in d
+                   and "LIMIT" not in q.upper())]
+        self.assertEqual(bad, [])
+
+    def test_purge_uses_indexes(self):
+        from monitoring.ird import IrdHealth
+        self.store.add_health(1000, "A", IrdHealth(48, 42, False, False, False))
+        self.store.add_status(1000, "fsh", "up", "")
+        plans = self._plans([self.store._db], lambda: self.store.purge_before(5000))
+        # Parcours complet de table interdit (un parcours d'index couvrant sur la petite table des états est admis).
+        self.assertEqual([(q, d) for q, d in plans if d.startswith("SCAN") and "INDEX" not in d], [])
+
+    def test_slow_history_does_not_block_status(self):
+        # Une requête d'historique longue (plusieurs dizaines de secondes sur une grosse base) ne doit pas bloquer
+        # l'état des appareils que la page demande en même temps.
+        self.store.add_ird(1000, "A", ird())
+        slow = threading.Thread(target=self.store._all, args=(
+            "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 4000000) SELECT COUNT(*) FROM c",))
+        slow.start()
+        time.sleep(0.05)
+        t0 = time.monotonic()
+        self.store.latest()
+        elapsed = time.monotonic() - t0
+        slow.join()
+        self.assertLess(elapsed, 0.3)
 
 class MultiIrdTest(unittest.TestCase):
     def setUp(self):
@@ -305,6 +378,7 @@ class StateTest(unittest.TestCase):
         self.store.close()
         import sqlite3
         db = sqlite3.connect(self.path)
+        db.execute("DROP INDEX IF EXISTS ird_sat_ird_ts_cov")  # base d'avant l'index couvrant
         db.execute("ALTER TABLE ird_sat DROP COLUMN state")
         db.execute("INSERT INTO ird_sat (ts, ird, locked, ts_locked, ber) VALUES (1, 'A', 0, 0, 0)")
         db.execute("INSERT INTO ird_sat (ts, ird, locked, ts_locked, ber) VALUES (2, 'A', 1, 1, 0)")

@@ -183,6 +183,7 @@ class Detector:
                                rise=True, source="fsh")
         self.down_events = {}    # appareil (« fsh » ou « ird:<série> ») → événement « injoignable »
         self.names = {}          # numéro de série → nom (connu même avant la première lecture)
+        self._alone_since = {}   # (série, groupe comparé) → depuis quand il est le seul dégradé de son groupe
 
     def set_name(self, serial: str, name: str) -> None:
         self.names[serial] = name
@@ -384,6 +385,7 @@ class Detector:
         depuis au moins 3 s pendant que les autres tiennent. La réception se compare entre tous les IRD
         de la porteuse ; l'image et le déchiffrement seulement entre IRD du même programme."""
         should = {}  # série → (porteuse, IRD normaux)
+        alone_now = set()
         for c in carriers:
             members = [m for m in c.irds if m in reachable and m in self.irds]
             groups = [(members, "reception_events", "degraded_since")]
@@ -396,8 +398,15 @@ class Detector:
                 degraded = [m for m in group if getattr(self.irds[m], events)()]
                 if len(degraded) == 1:
                     m = degraded[0]
-                    if m not in should and ts - getattr(self.irds[m], since) >= ALONE_DELAY_MS:
+                    # Le délai court depuis qu'il est le seul dégradé, pas depuis le début de sa dégradation :
+                    # après une coupure commune, l'IRD qui se rétablit le dernier n'est pas « seul en défaut ».
+                    key = (m, events)
+                    alone_now.add(key)
+                    first = self._alone_since.setdefault(key, ts)
+                    if m not in should and ts - max(first, getattr(self.irds[m], since)) >= ALONE_DELAY_MS:
                         should[m] = (c, [x for x in group if x != m])
+        for key in [k for k in self._alone_since if k not in alone_now]:
+            del self._alone_since[key]
         changed = []
         for serial, r in self.irds.items():
             if serial in should and r.alone_event is None:

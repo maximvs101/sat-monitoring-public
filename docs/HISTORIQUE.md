@@ -1,13 +1,12 @@
 # Historique
 
-## État actuel (22 octobre 2026, soir)
+## État actuel (24 octobre 2026)
 
-- Branche `main` ; 262 tests Python et 13 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 273 tests Python et 17 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
 - Site actuel : réseau 192.168.10.x.
-  - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) sur la porteuse « C1 » (12 583,0 V), programme P100/2, marge 6,3 dB, état normal.
-  - IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) sur la porteuse « C2 » (12 592,0 V) : joignable mais **lock perdu depuis 18:56 le 22/10** (puissance d'entrée 0 dBm, marge 0), alerte en cours ; côté réception, pas lié au code.
-  - FSH4 : l'outil pointe depuis le 22/10 au soir sur un autre FSH4, 192.168.10.99 (n° 100001, firmware V2.50), qui n'a pas l'option FSH-K40 : aucune mesure possible (voir le guide). L'ancien FSH4 (192.168.10.224, V1.20) n'en avait pas besoin. La puissance d'entrée des IRD tient lieu de niveau RF.
+  - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
+  - FSH4 : l'outil pointe depuis le 22/10 au soir sur un autre FSH4, 192.168.10.99 (injoignable au 24/10) (n° 100001, firmware V2.50), qui n'a pas l'option FSH-K40 : aucune mesure possible (voir le guide). L'ancien FSH4 (192.168.10.224, V1.20) n'en avait pas besoin. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
 - Windows : versions publiées sur le dépôt public, dernière **v1.0.2** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.0.2, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
@@ -34,6 +33,16 @@
   - page en Direct si `live_window_min × 60 × 4 > max_points` : séries agrégées complétées de points bruts ;
   - SQLite : dernier état des appareils et `events()` sans index adapté ;
   - réécriture de `config.toml` : commentaires entre blocs `[[irds]]`/`[[carriers]]` perdus ; porteuse sans `freq_mhz` ou `rate_hz = 0` : erreur peu claire au démarrage ; ajout de porteuse sans dédoublonnage.
+
+## 24 octobre 2026
+
+- Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Revue complète** (quatre relectures : collecte, alertes, service et base, page) puis **lot 1 de corrections** :
+  - page : carte « SANS NOUVELLES » et valeurs « — » quand le direct est coupé ou qu'un IRD n'a plus de mesure depuis 10 s (au lieu de « OK » figé), « IRD en service » à « — » ; événement fermé pendant un rechargement gardé ; rechargement demandé pendant un autre refait ensuite ;
+  - alertes : « IRD seul en défaut » compté depuis qu'il est seul dégradé (plus d'alerte « câblage » après une coupure commune) ; plus d'« Appareil injoignable » orphelin pour un IRD retiré ; BER sans valeur quand l'IRD est déverrouillé ;
+  - périodes longues : temps réel passé dans chaque état calculé par le service (une perte de lock de 2 s ne compte plus pour un intervalle de 29 min) ; minimum et maximum des marqueurs FSH4 tirés des extrêmes de chaque intervalle ;
+  - base : index couvrants (l'historique se lit dans les index), 4 connexions de lecture (une requête d'historique longue ne bloque plus la page), purge par lots dans son fil (plus au démarrage), index de purge, `synchronous=NORMAL` ;
+  - Windows : fenêtre de l'exécutable gardée ouverte sur une erreur de démarrage, `config.toml` enregistré « avec BOM » accepté, jamais de proxy système vers les IRD, recherche réseau qui ne s'arrête plus sur un port 80 qui ne parle pas HTTP.
 
 ## 22 octobre 2026
 

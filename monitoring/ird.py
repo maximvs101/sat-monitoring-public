@@ -1,6 +1,7 @@
 """Client XML-RPC du DR5000 Ateme, en lecture seule : réception satellite, décodage (image, son, programme),
 état matériel et journal de l'IRD."""
 
+import http.client
 import logging
 import time
 import urllib.error
@@ -248,8 +249,8 @@ def parse_refresh(data: bytes) -> IrdSample:
         ts_locked=ts_locked,
         cn_db=_num(inp, "sat/snr", float, 10),
         margin_db=_num(inp, "sat/snrMargin", float, 10),
-        ber=_num(inp, "sat/ber", float, BER_SCALE),
-        ber_raw=_text(inp, "sat/ber"),
+        ber=_num(inp, "sat/ber", float, BER_SCALE) if locked else None,
+        ber_raw=_text(inp, "sat/ber") if locked else None,
         power_dbm=_num(inp, "sat/power", float) if locked else None,
         if_khz=if_khz if locked else None,
         symbol_rate=(_num(inp, "sat/symbolRate", int) or None) if locked else None,
@@ -305,6 +306,15 @@ def parse_status(data: bytes) -> tuple[str, str]:
     return serial, _text(root, "system/systemName") or ""
 
 
+# Les IRD sont sur le réseau local : jamais par le proxy du système (PC d'entreprise sous Windows, où seuls les noms
+# sans point le contournent).
+_NO_PROXY = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+def open_url(request: urllib.request.Request, timeout: float):
+    return _NO_PROXY.open(request, timeout=timeout)
+
+
 def xml_request(url: str, body: bytes) -> urllib.request.Request:
     """Requête XML-RPC de l'interface web du DR5000 : corps brut en text/plain."""
     return urllib.request.Request(url, data=body, headers={"Content-Type": "text/plain; charset=utf-8"},
@@ -319,7 +329,7 @@ class IrdClient:
 
     def _post(self, body: bytes, timeout_s: float | None = None) -> bytes:
         try:
-            with urllib.request.urlopen(xml_request(self.url, body), timeout=timeout_s or self.cfg.timeout_s) as resp:
+            with open_url(xml_request(self.url, body), timeout=timeout_s or self.cfg.timeout_s) as resp:
                 if resp.status != 200:
                     raise IrdError(f"HTTP {resp.status}")
                 return resp.read()
@@ -329,6 +339,8 @@ class IrdClient:
             raise IrdError(f"IRD : HTTP {e.code}") from e
         except (urllib.error.URLError, OSError) as e:
             raise IrdError(f"IRD injoignable : {e}") from e
+        except http.client.HTTPException as e:
+            raise IrdError(f"réponse HTTP incomplète ou invalide ({type(e).__name__})") from e
 
     def fetch(self) -> IrdSample:
         return parse_refresh(self._post(REFRESH_BODY))

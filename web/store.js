@@ -90,20 +90,28 @@ const Store = (() => {
     const nums = Object.keys(data.fsh).map(Number).sort((a, b) => a - b);
     const ts = [...new Set(nums.flatMap((n) => data.fsh[n].ts))].sort((a, b) => a - b);
     const index = new Map(ts.map((t, i) => [t, i]));
-    const levels = {}, freqs = {};
+    const levels = {}, freqs = {}, levelsMin = {}, levelsMax = {};
     for (const n of nums) {
       const s = data.fsh[n];
       levels[n] = new Array(ts.length).fill(null);
-      s.ts.forEach((t, i) => { levels[n][index.get(t)] = s.level_dbm[i]; });
+      levelsMin[n] = new Array(ts.length).fill(null);  // agrégée : la plus basse et la plus haute de chaque intervalle
+      levelsMax[n] = new Array(ts.length).fill(null);
+      s.ts.forEach((t, i) => {
+        const k = index.get(t);
+        levels[n][k] = s.level_dbm[i];
+        levelsMin[n][k] = (s.level_dbm_min || s.level_dbm)[i];
+        levelsMax[n][k] = (s.level_dbm_max || s.level_dbm)[i];
+      });
       freqs[n] = s.freq_hz.length ? s.freq_hz[s.freq_hz.length - 1] : null;
     }
     const irds = {};
     for (const [serial, s] of Object.entries(data.irds)) {
       irds[serial] = { ts: s.ts, margin_db: s.margin_db, locked: s.locked, state: s.state, power_dbm: s.power_dbm,
-        margin_min: s.margin_db_min || s.margin_db };  // agrégée : la plus basse de chaque intervalle
+        margin_min: s.margin_db_min || s.margin_db,  // agrégée : la plus basse de chaque intervalle
+        state_ms: s.state_ms || null };              // agrégée : temps passé dans chaque état, par intervalle
     }
     const aggregated = Object.values(data.fsh).some((s) => s.aggregated) || Object.values(data.irds).some((s) => s.aggregated);
-    return { fsh: { ts, nums, levels, freqs }, irds, aggregated };
+    return { fsh: { ts, nums, levels, levelsMin, levelsMax, freqs }, irds, aggregated };
   }
 
   // Période passée : séries (agrégées selon `points`), porteuses de la période, événements. Ne touche pas au direct.
@@ -140,17 +148,31 @@ const Store = (() => {
         state.irds = converted.irds;
         Object.assign(state.names, series.names);
         state.events = new Map(events.map((e) => [e.id, e]));
-        buffered.forEach(appendLive);
+        // Reçu pendant le chargement : plus récent que l'instantané (alerte ouverte ou fermée entre-temps).
+        for (const msg of buffered) {
+          if (msg.type === "event") state.events.set(msg.id, msg);
+          else appendLive(msg);
+        }
       }
     }
     notify("reload");
   }
 
-  let reloading = false;
+  // Un rechargement demandé pendant un autre est fait juste après (une porteuse apparue entre-temps…).
+  let reloading = false, again = false;
   function reload() {
-    if (reloading) return;
+    if (reloading) {
+      again = true;
+      return;
+    }
     reloading = true;
-    loadLive().catch((e) => console.error(e)).finally(() => { reloading = false; });
+    loadLive().catch((e) => console.error(e)).finally(() => {
+      reloading = false;
+      if (again) {
+        again = false;
+        reload();
+      }
+    });
   }
 
   function trimLive() {
@@ -210,6 +232,7 @@ const Store = (() => {
       reload();
     } else if (msg.type === "event") {
       state.events.set(msg.id, msg);
+      if (pending) pending.push(msg);
       notify("event");
     }
   }

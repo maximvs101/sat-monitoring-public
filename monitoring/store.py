@@ -1,6 +1,7 @@
 """Stockage SQLite des mesures, des états d'appareils et des événements."""
 
 import math
+import queue
 import sqlite3
 import threading
 from dataclasses import asdict
@@ -19,14 +20,17 @@ CREATE TABLE IF NOT EXISTS ird_sat (
 CREATE TABLE IF NOT EXISTS ird_health (ts INTEGER NOT NULL, ird TEXT, fpga_temp REAL, cpu_temp REAL,
     overheat INTEGER, fan_failure INTEGER, power_failure INTEGER);
 CREATE INDEX IF NOT EXISTS ird_health_ird_ts ON ird_health(ird, ts);
+CREATE INDEX IF NOT EXISTS ird_health_ts ON ird_health(ts);
 CREATE INDEX IF NOT EXISTS ird_sat_ts ON ird_sat(ts);
 CREATE TABLE IF NOT EXISTS ird_names (serial TEXT PRIMARY KEY, name TEXT, last_seen INTEGER);
 CREATE TABLE IF NOT EXISTS device_status (ts INTEGER NOT NULL, device TEXT, state TEXT, detail TEXT);
 CREATE INDEX IF NOT EXISTS device_status_ts ON device_status(ts);
+CREATE INDEX IF NOT EXISTS device_status_device_ts ON device_status(device, ts);
 CREATE TABLE IF NOT EXISTS events (
     id INTEGER PRIMARY KEY, ts_start INTEGER NOT NULL, ts_end INTEGER,
     kind TEXT, severity TEXT, detail TEXT, source TEXT);
 CREATE INDEX IF NOT EXISTS events_ts_start ON events(ts_start);
+CREATE INDEX IF NOT EXISTS events_ts_end ON events(ts_end);
 """
 
 # Colonnes numériques exposées par series() ; liste blanche contre l'injection SQL.
@@ -35,6 +39,9 @@ SERIES_COLUMNS = {
     "ird_sat": {"locked", "ts_locked", "cn_db", "margin_db", "ber", "power_dbm", "if_khz", "bitrate_kbps", "state"},
 }
 MARKER_STALE_MS = 30_000
+READERS = 4  # connexions de lecture simultanées (requêtes de la page)
+PURGE_BATCH = 50_000  # lignes supprimées par lot
+STATE_GAP_MS = 3000  # au-delà, le trou entre deux mesures d'un IRD est une coupure (rien n'est compté)
 # Une perte de lock ne doit pas disparaître dans une moyenne.
 MIN_AGGREGATED = {"locked", "ts_locked"}
 # Bande « État » : chaque intervalle agrégé prend la pire couleur de ses mesures.
@@ -65,11 +72,15 @@ class Store:
         self._lock = threading.Lock()
         self._db = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
         self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")  # en WAL : sûr, et une seule écriture disque par point de reprise
         self._db.executescript(SCHEMA)
         self._migrate()
-        # Connexion de lecture séparée : en WAL, une requête d'historique longue ne bloque pas la collecte.
-        self._read_lock = threading.Lock()
-        self._reader = sqlite3.connect(path, check_same_thread=False, isolation_level=None)
+        # Lectures : quelques connexions partagées. En WAL, une requête d'historique longue n'en occupe qu'une : elle
+        # ne bloque ni la collecte ni les autres lectures (état des appareils demandé en même temps par la page).
+        self._readers = [sqlite3.connect(path, check_same_thread=False, isolation_level=None) for _ in range(READERS)]
+        self._pool = queue.Queue()
+        for conn in self._readers:
+            self._pool.put(conn)
 
     def _columns(self, table):
         return {row[1] for row in self._db.execute(f"PRAGMA table_info({table})")}
@@ -80,7 +91,9 @@ class Store:
         # Avant les marqueurs multiples : tout est le marqueur 1.
         if "n" not in self._columns("fsh_marker"):
             db.execute("ALTER TABLE fsh_marker ADD COLUMN n INTEGER NOT NULL DEFAULT 1")
-        db.execute("CREATE INDEX IF NOT EXISTS fsh_marker_n_ts ON fsh_marker(n, ts)")
+        # Index couvrants : l'historique se lit dans l'index, sans revenir à la table (dizaines de millions de lignes).
+        db.execute("CREATE INDEX IF NOT EXISTS fsh_marker_n_ts_cov ON fsh_marker(n, ts, level_dbm, freq_hz)")
+        db.execute("DROP INDEX IF EXISTS fsh_marker_n_ts")
         # Avant les IRD multiples (21/10/2026), puis l'état des IRD (22/10/2026).
         columns = self._columns("ird_sat")
         added = set()
@@ -91,7 +104,9 @@ class Store:
                 added.add(col)
         if "source" not in self._columns("events"):
             db.execute("ALTER TABLE events ADD COLUMN source TEXT")
-        db.execute("CREATE INDEX IF NOT EXISTS ird_sat_ird_ts ON ird_sat(ird, ts)")
+        db.execute(f"CREATE INDEX IF NOT EXISTS ird_sat_ird_ts_cov ON ird_sat(ird, ts, "
+                   f"{', '.join(IRD_SERIES_COLUMNS + TUNING_COLUMNS)})")
+        db.execute("DROP INDEX IF EXISTS ird_sat_ird_ts")
         if "state" in added:
             # Mesures d'avant l'état des IRD : couleur de la bande d'après le lock et le BER seulement.
             db.execute("UPDATE ird_sat SET state = CASE WHEN locked = 0 OR ts_locked = 0 THEN 3 "
@@ -102,8 +117,11 @@ class Store:
             return self._db.execute(sql, params)
 
     def _all(self, sql, params=()):
-        with self._read_lock:
-            return self._reader.execute(sql, params).fetchall()
+        conn = self._pool.get()
+        try:
+            return conn.execute(sql, params).fetchall()
+        finally:
+            self._pool.put(conn)
 
     def add_marker(self, ts: int, s: MarkerSample, n: int = 1) -> None:
         self._exec("INSERT INTO fsh_marker (ts, freq_hz, level_dbm, n) VALUES (?, ?, ?, ?)",
@@ -150,32 +168,41 @@ class Store:
         return dict(zip(EVENT_COLUMNS, row))
 
     def purge_before(self, ts: int) -> None:
-        """Supprime les mesures, états et événements terminés antérieurs à ts.
-        Le dernier état de chaque appareil est conservé."""
+        """Supprime les mesures, états et événements terminés antérieurs à ts. Le dernier état de chaque appareil
+        est conservé. Par lots : la collecte n'attend jamais plus qu'un lot, même pour des millions de lignes."""
+        for table in ("fsh_marker", "ird_sat", "ird_health"):
+            self._delete_in_batches(f"DELETE FROM {table} WHERE rowid IN "
+                                    f"(SELECT rowid FROM {table} WHERE ts < ? LIMIT {PURGE_BATCH})", (ts,))
+        self._delete_in_batches(
+            "DELETE FROM device_status WHERE rowid IN (SELECT rowid FROM device_status WHERE ts < ? AND rowid NOT IN "
+            f"(SELECT MAX(rowid) FROM device_status GROUP BY device) LIMIT {PURGE_BATCH})", (ts,))
+        self._delete_in_batches(f"DELETE FROM events WHERE id IN (SELECT id FROM events WHERE ts_end IS NOT NULL "
+                                f"AND ts_end < ? LIMIT {PURGE_BATCH})", (ts,))
         with self._lock:
-            self._db.execute("DELETE FROM fsh_marker WHERE ts < ?", (ts,))
-            self._db.execute("DELETE FROM ird_sat WHERE ts < ?", (ts,))
-            self._db.execute("DELETE FROM ird_health WHERE ts < ?", (ts,))
-            self._db.execute(
-                "DELETE FROM device_status WHERE ts < ? AND rowid NOT IN "
-                "(SELECT MAX(rowid) FROM device_status GROUP BY device)", (ts,))
-            self._db.execute("DELETE FROM events WHERE ts_end IS NOT NULL AND ts_end < ?", (ts,))
+            self._db.execute("PRAGMA wal_checkpoint(TRUNCATE)")  # le journal ne garde pas la taille de la purge
+
+    def _delete_in_batches(self, sql: str, params: tuple) -> None:
+        while True:
+            with self._lock:
+                deleted = self._db.execute(sql, params).rowcount
+            if deleted < PURGE_BATCH:
+                return
 
     def last_ts(self) -> int | None:
         return self._all("SELECT MAX(m) FROM (SELECT MAX(ts) m FROM fsh_marker UNION ALL SELECT MAX(ts) FROM ird_sat)")[0][0]
 
     def marker_series(self, from_ts: int, to_ts: int, max_points: int) -> dict:
         """Une série par marqueur FSH4 présent dans la plage : {numéro: série}."""
-        numbers = [r[0] for r in self._all(
-            "SELECT DISTINCT n FROM fsh_marker WHERE ts >= ? AND ts <= ? ORDER BY n", (from_ts, to_ts))]
+        # Un marqueur est présent s'il a au moins une mesure dans la plage (index (n, ts) : sans parcourir la plage).
+        numbers = [n for n in MARKER_NUMBERS if self._all(
+            "SELECT 1 FROM fsh_marker WHERE n = ? AND ts >= ? AND ts <= ? LIMIT 1", (n, from_ts, to_ts))]
         return {n: self.series("fsh_marker", ["freq_hz", "level_dbm"], from_ts, to_ts, max_points, n=n)
                 for n in numbers}
 
     def ird_series(self, from_ts: int, to_ts: int, max_points: int) -> dict:
         """Une série par IRD présent dans la plage : {numéro de série: série + « tuning »}."""
-        serials = [r[0] for r in self._all(
-            "SELECT DISTINCT ird FROM ird_sat WHERE ts >= ? AND ts <= ? AND ird IS NOT NULL ORDER BY ird",
-            (from_ts, to_ts))]
+        serials = [serial for serial in self._serials() if self._all(
+            "SELECT 1 FROM ird_sat WHERE ird = ? AND ts >= ? AND ts <= ? LIMIT 1", (serial, from_ts, to_ts))]
         out = {}
         for serial in serials:
             s = self.series("ird_sat", IRD_SERIES_COLUMNS, from_ts, to_ts, max_points, ird=serial)
@@ -192,6 +219,26 @@ class Store:
             s["segments"] = self._segments(serial, from_ts, to_ts)
             out[serial] = s
         return out
+
+    def _state_durations(self, where: str, params: tuple, from_ts: int, bucket: int, buckets: list) -> list:
+        """Temps passé dans chaque code de la bande « État » (0 à 3), en ms, par intervalle agrégé : chaque mesure
+        compte jusqu'à la suivante, sauf au-delà de STATE_GAP_MS (coupure). Un défaut d'une seconde ne compte pas
+        pour tout l'intervalle, comme le ferait le pire code de l'intervalle."""
+        rows = self._all(
+            "SELECT (ts - ?) / ? AS b, "
+            + ", ".join(f"SUM(CASE WHEN state = {k} THEN dt ELSE 0 END)" for k in range(4))
+            + " FROM (SELECT ts, state, CASE WHEN nxt - ts <= ? THEN nxt - ts ELSE 0 END AS dt FROM ("
+            f"  SELECT ts, state, LEAD(ts) OVER (ORDER BY ts) AS nxt FROM ird_sat WHERE {where})) GROUP BY b",
+            (from_ts, bucket, STATE_GAP_MS, *params))
+        by_bucket = {r[0]: [int(v or 0) for v in r[1:]] for r in rows}
+        return [by_bucket.get(b, [0, 0, 0, 0]) for b in buckets]
+
+    def _serials(self) -> list:
+        """Numéros de série présents dans la base, lus dans l'index (ird, ts) sans parcourir la table."""
+        return [r[0] for r in self._all(
+            "WITH RECURSIVE s(ird) AS (SELECT MIN(ird) FROM ird_sat WHERE ird IS NOT NULL UNION ALL "
+            "SELECT (SELECT MIN(ird) FROM ird_sat WHERE ird > s.ird) FROM s WHERE s.ird IS NOT NULL) "
+            "SELECT ird FROM s WHERE ird IS NOT NULL")]
 
     def _segments(self, serial: str, from_ts: int, to_ts: int) -> list:
         """Périodes pendant lesquelles l'IRD est resté sur un même réglage (fréquence au MHz près, polarisation)."""
@@ -251,6 +298,8 @@ class Store:
             out[c] = [r[1 + 3 * i] for r in rows]
             out[c + "_min"] = [r[2 + 3 * i] for r in rows]
             out[c + "_max"] = [r[3 + 3 * i] for r in rows]
+        if table == "ird_sat" and ird is not None and "state" in columns:
+            out["state_ms"] = self._state_durations(where, params, from_ts, bucket, [r[0] for r in rows])
         return out
 
     def events(self, from_ts: int, to_ts: int) -> list[dict]:
@@ -304,7 +353,7 @@ class Store:
         }
 
     def close(self) -> None:
-        with self._read_lock:
-            self._reader.close()
+        for conn in self._readers:
+            conn.close()
         with self._lock:
             self._db.close()
