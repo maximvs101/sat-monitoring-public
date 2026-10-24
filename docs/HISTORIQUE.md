@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.2.1** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.1, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
+- Windows : versions publiées sur le dépôt public, dernière **v1.2.2** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.2, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
 ## À faire
 
@@ -31,6 +31,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Version v1.2.2** publiée (corrections des alarmes ci-dessous) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.2, notes en français.
 - **Alarme qui ne s'arrêtait pas** (IRD et FSH4 éteints) : en relançant le service pour un correctif, ses alertes « Appareil injoignable », fermées à l'arrêt puis rouvertes, sonnaient de nouveau toutes les 30 s dans les pages ouvertes, sans fin puisque les appareils restaient éteints. Corrigé : alertes fermées par l'arrêt du service marquées « — service arrêté » ; acquittement retenu par appareil et type d'alerte jusqu'à une fin réelle (une alerte rouverte par un redémarrage ne resonne pas) ; alertes en cours au chargement comptées comme acquittées ; répétition arrêtée après 15 min (réglable) ; bouton « Silence 1 h » par appareil. Vérifié sur le service réel : redémarrage avec trois alertes ouvertes, aucun son ; vraie nouvelle panne : alarme ; silence : plus d'alarme pour l'appareil.
 - **Version v1.2.1** publiée (nombre géant écarté) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.1, notes en français.
 - **Nombre géant envoyé par un IRD** : à 16:37 et 16:39, au moment où les IRD 1 et 3 reverrouillaient, une lecture de chacun n'a pas pu être enregistrée (entier trop grand pour SQLite, typiquement « -1 » non signé sur 64 bits) : la lecture était perdue (ni base ni détection), la collecte continuait. Corrigé : un nombre hors limites devient « pas de valeur » à la lecture, et l'enregistrement l'écarte aussi en dernier rempart. Vers 16:43, les IRD ont été éteints sur le site (« injoignable », normal).
