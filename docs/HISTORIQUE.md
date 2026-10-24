@@ -3,10 +3,10 @@
 ## État actuel (24 octobre 2026)
 
 - Branche `main` ; 304 tests Python et 22 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
-- Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours.
+- Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; il tourne avec le code de la v1.1.0 depuis le 24/10.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
-  - FSH4 : l'outil pointe depuis le 22/10 au soir sur un autre FSH4, 192.168.10.99 (injoignable au 24/10) (n° 100001, firmware V2.50), qui n'a pas l'option FSH-K40 : aucune mesure possible (voir le guide). L'ancien FSH4 (192.168.10.224, V1.20) n'en avait pas besoin. La puissance d'entrée des IRD tient lieu de niveau RF.
+  - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
 - Windows : versions publiées sur le dépôt public, dernière **v1.1.0** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0, `MonitoringSat-Windows.zip`) ; pas encore essayée sur un PC du site.
 
@@ -18,6 +18,11 @@
 - Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
+- Pistes pour la suite :
+  - **notifications** des alertes (son dans la page, Teams / ntfy / Telegram, e-mail, syslog) : proposition détaillée dans [propositions/2026-10-24-notifications.md](propositions/2026-10-24-notifications.md), questions à trancher avec Max avant de développer ;
+  - suivi des encodeurs Kyrion CM5000 en lecture seule (sorties SRT : RTT, retransmissions, débit ; sorties ASI) par la même requête que leur page (`getStatus`) ;
+  - rapport de période par porteuse (disponibilité, coupures, marges minimales), imprimable ou exportable ;
+  - service Windows (démarrage au boot sans fenêtre, redémarrage automatique).
 - Limites assumées (pas des défauts à corriger) :
   - FSH4 V1.20 : il reste un aller-retour réseau entre « marqueur allumé ? » et la lecture de sa fréquence ou de son niveau ; un marqueur éteint par l'opérateur exactement à ce moment serait rallumé (le protocole n'a pas de lecture atomique ; touches verrouillées en mode Remote) ;
   - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
