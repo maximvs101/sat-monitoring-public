@@ -69,6 +69,9 @@ Quand le démodulateur décroche, le DR5000 met sa puissance d'entrée, son déb
 ## Son des alertes dans la page (Réglages › Notifications)
 
 - **Alerte critique** (perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable…) : alarme à deux tons, répétée toutes les 30 s (réglable : 15 s, 1 min, jamais) jusqu'à ce qu'on clique **Acquitter** dans le bandeau rouge en haut de la page, ou que l'alerte se referme d'elle-même.
+- La répétition s'arrête d'elle-même après 15 min (réglable : 5 min, 1 h, jamais) : un appareil éteint volontairement ne sonne pas indéfiniment ; le bandeau reste affiché, avec la mention « alarme arrêtée après … ».
+- **Silence 1 h** (dans le bandeau) : plus d'alarme pour cet appareil pendant une heure, le temps d'une intervention ; cartes, journal et bandeau des autres appareils restent à jour.
+- Une alerte acquittée que le service rouvre en redémarrant (il ferme les alertes en cours en s'arrêtant, avec la mention « — service arrêté ») ne resonne pas : l'acquittement vaut pour cet appareil et ce type d'alerte jusqu'à ce que l'alerte se termine vraiment. Les alertes déjà en cours au chargement de la page comptent comme acquittées.
 - **Avertissement** (BER élevé, chute ou marge basse, son absent…) : un bip, une seule fois.
 - Seules les alertes qui s'ouvrent après le chargement de la page sonnent : recharger la page ne relance pas l'alarme des alertes déjà en cours.
 - **Son coupé / activé** depuis le menu (sous « en direct ») ; son coupé, le bandeau d'acquittement reste affiché. Les navigateurs n'autorisent le son qu'après un premier clic dans la page : le menu affiche alors « Activer le son ».

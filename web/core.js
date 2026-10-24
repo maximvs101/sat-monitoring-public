@@ -182,7 +182,37 @@ function alertSound(ev, prefs) {
   return null;
 }
 
+const STOPPED_REASON = "— service arrêté";  // ajouté par le service aux alertes qu'il ferme en s'arrêtant
+
+// Une alerte se reconnaît d'une ouverture à l'autre par son appareil et son type.
+function alertKey(ev) {
+  return `${ev.source}|${ev.kind}`;
+}
+
+// Terminée parce que le défaut a cessé (et non fermée par l'arrêt du service, le défaut pouvant durer encore).
+function reallyEnded(ev) {
+  return ev.ts_end != null && !(ev.detail || "").endsWith(STOPPED_REASON);
+}
+
+// Son d'une alerte qui vient de s'ouvrir : `ackedKeys` (alertes acquittées, par appareil et type, pas encore vues se
+// terminer vraiment), `muted` ({ source: fin du silence en ms }), `now`. Pas d'alarme pour un appareil en silence
+// (intervention), ni pour une alerte acquittée que le service, redémarré, rouvre (même panne).
+function alarmFor(ev, { prefs, ackedKeys, muted, now }) {
+  const sound = alertSound(ev, prefs);
+  if (!sound) return null;
+  if (muted[ev.source] > now) return null;
+  if (ackedKeys.has(alertKey(ev))) return null;
+  return sound;
+}
+
+// Répéter l'alarme maintenant ? `r` : { since (début de l'alarme), next (prochaine répétition) } ; arrêt après
+// `repeat_max_min` minutes (0 = jamais), pas de répétition si `repeat_s` vaut 0.
+function repeatDue(r, now, prefs) {
+  if (!prefs.repeat_s || now < r.next) return false;
+  return !prefs.repeat_max_min || now - r.since < prefs.repeat_max_min * 60_000;
+}
+
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue };
 }

@@ -84,6 +84,15 @@ class StoreTest(unittest.TestCase):
         self.store.add_ird(1000, "A", replace(ird(), video_bitrate=2**64 - 1))
         self.assertEqual(self.store._all("SELECT COUNT(*), MAX(video_bitrate) FROM ird_sat")[0], (1, None))
 
+    def test_events_closed_at_stop_say_so(self):
+        # Fermées parce que le service s'arrête, pas parce que le défaut a cessé : la page le sait (une alerte
+        # acquittée qui se rouvre au redémarrage ne doit pas resonner).
+        event_id = self.store.open_event(1000, "device_down", "critical", "IRD 1 — injoignable", "ird:A")
+        self.store.close_open_events(5000)
+        [ev] = self.store.events(0, 10_000)
+        self.assertEqual((ev["ts_end"], ev["detail"]), (5000, "IRD 1 — injoignable — service arrêté"))
+        self.assertEqual(ev["id"], event_id)
+
     def test_power_absent_when_unlocked(self):
         # Les anciennes lectures déverrouillées ont 0 dBm (valeur de l'IRD, pas une mesure) : pas de pic à 0 dBm.
         for i in range(10):

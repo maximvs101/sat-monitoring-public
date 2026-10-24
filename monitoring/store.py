@@ -172,7 +172,10 @@ class Store:
         self._exec("UPDATE events SET severity = ? WHERE id = ?", (severity, event_id))
 
     def close_open_events(self, ts_end: int) -> int:
-        return self._exec("UPDATE events SET ts_end = MAX(ts_start, ?) WHERE ts_end IS NULL", (ts_end,)).rowcount
+        # Le motif dit que le défaut n'a pas forcément cessé : la page ne refait pas sonner une alerte acquittée qui
+        # se rouvre au redémarrage.
+        return self._exec("UPDATE events SET ts_end = MAX(ts_start, ?), detail = detail || ' — service arrêté' "
+                          "WHERE ts_end IS NULL", (ts_end,)).rowcount
 
     def event(self, event_id: int) -> dict:
         # Connexion d'écriture : appelée par la détection (fils de collecte), elle ne doit jamais attendre

@@ -283,6 +283,8 @@ const SettingsPage = (() => {
     const repeat = select([["15", "toutes les 15 s"], ["30", "toutes les 30 s"], ["60", "toutes les minutes"], ["0", "jamais (une seule fois)"]],
       String(p.repeat_s));
     repeat.addEventListener("change", () => rerender({ repeat_s: Number(repeat.value) }));
+    const maxRepeat = select([["5", "5 min"], ["15", "15 min"], ["60", "1 h"], ["0", "jamais"]], String(p.repeat_max_min));
+    maxRepeat.addEventListener("change", () => rerender({ repeat_max_min: Number(maxRepeat.value) }));
     const volume = el("input", { type: "range", min: "0.1", max: "1", step: "0.1", value: String(p.volume) });
     volume.addEventListener("change", () => { Alerts.set({ volume: Number(volume.value) }); Alerts.play("beep"); });
     const supported = "Notification" in window;
@@ -305,8 +307,10 @@ const SettingsPage = (() => {
       ...(lockedNote ? [lockedNote] : []),
       checkbox("Son activé", p.sound, (on) => rerender({ sound: on })),
       checkbox("Alarme pour les alertes critiques", p.critical, (on) => rerender({ critical: on }),
-        "Perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable… Répétée jusqu'à « Acquitter » (bandeau en haut de la page) ou la fin de l'alerte."),
+        "Perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable… Répétée jusqu'à « Acquitter » (bandeau en haut de la page), la fin de l'alerte ou le délai ci-dessous. Une alerte acquittée que le service rouvre en redémarrant ne resonne pas."),
       el("label", { className: "field" }, "Répéter l'alarme", repeat),
+      el("label", { className: "field" }, "Arrêter de répéter après", maxRepeat,
+        el("small", { textContent: "Un appareil éteint volontairement ne sonne pas indéfiniment : passé ce délai, le bandeau reste mais l'alarme se tait. Pendant une intervention, « Silence 1 h » dans le bandeau coupe l'alarme d'un appareil." })),
       checkbox("Bip pour les avertissements", p.warning, (on) => rerender({ warning: on }),
         "BER élevé, chute ou marge basse, son absent… Un seul bip, sans répétition."),
       el("label", { className: "field" }, "Volume", volume),

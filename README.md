@@ -31,7 +31,7 @@ puis **http://localhost:8091**.
 - **Journal** des événements, filtrable ; un clic ouvre la porteuse au moment de l'événement.
 - **Analyseur FSH4** : état, réglages lus, marqueurs et plancher de bruit, pause pour rendre la main sur l'appareil.
 - **Réglages** : appareils, porteuses, seuils d'alerte sur la marge, son des alertes.
-- **Son des alertes** : alarme répétée pour une alerte critique jusqu'à « Acquitter », bip pour un avertissement, notification du navigateur en option.
+- **Son des alertes** : alarme répétée pour une alerte critique jusqu'à « Acquitter » (15 min au plus, « Silence 1 h » pendant une intervention), bip pour un avertissement, notification du navigateur en option.
 
 Tout le détail (alertes et leurs seuils, marqueurs, réglages, données, API) : **[docs/GUIDE.md](docs/GUIDE.md)**.
 
@@ -57,7 +57,7 @@ python3 -m unittest discover tests
 node --test "web/tests/*.test.js"
 ```
 
-306 tests Python et 23 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
+307 tests Python et 26 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
 
 ## Documentation
 

@@ -174,3 +174,32 @@ test("son d'une alerte : critique (alarme répétée), avertissement (un bip), s
   assert.equal(core.alertSound(warn, { ...prefs, warning: false }), null);
   assert.equal(core.alertSound(crit, { ...prefs, critical: false }), null);
 });
+
+test("alerte rouverte par un redémarrage du service : pas de nouvelle alarme si elle avait été acquittée", () => {
+  const prefs = { critical: true, warning: true };
+  const reopened = { id: 2, kind: "device_down", source: "ird:A", severity: "critical", ts_start: 60_000, ts_end: null, detail: "IRD 1 — injoignable" };
+  // Acquittée (même appareil, même type) et jamais vue se terminer vraiment : même panne, pas d'alarme.
+  assert.equal(core.alarmFor(reopened, { prefs, ackedKeys: new Set(["ird:A|device_down"]), muted: {}, now: 60_000 }), null);
+  assert.equal(core.alarmFor(reopened, { prefs, ackedKeys: new Set(), muted: {}, now: 60_000 }), "alarm");
+  assert.equal(core.alertKey(reopened), "ird:A|device_down");
+  // Fin réelle (l'appareil répond de nouveau) : l'acquittement est oublié ; fermeture à l'arrêt du service : gardé.
+  assert.equal(core.reallyEnded({ ...reopened, ts_end: 70_000, detail: "IRD 1 — injoignable" }), true);
+  assert.equal(core.reallyEnded({ ...reopened, ts_end: 70_000, detail: "IRD 1 — injoignable — service arrêté" }), false);
+  assert.equal(core.reallyEnded(reopened), false);
+});
+
+test("appareil mis en silence (intervention) : pas d'alarme jusqu'à la fin du silence", () => {
+  const prefs = { critical: true, warning: true };
+  const ev = { id: 3, kind: "device_down", source: "fsh", severity: "critical", ts_start: 10_000, ts_end: null, detail: "x" };
+  assert.equal(core.alarmFor(ev, { prefs, ackedKeys: new Set(), muted: { fsh: 3_600_000 }, now: 10_000 }), null);
+  assert.equal(core.alarmFor(ev, { prefs, ackedKeys: new Set(), muted: { fsh: 3_600_000 }, now: 3_700_000 }), "alarm");
+});
+
+test("répétition de l'alarme : toutes les N s, arrêtée après la durée maximale", () => {
+  const prefs = { repeat_s: 30, repeat_max_min: 15 };
+  assert.equal(core.repeatDue({ since: 0, next: 30_000 }, 29_000, prefs), false);
+  assert.equal(core.repeatDue({ since: 0, next: 30_000 }, 30_000, prefs), true);
+  assert.equal(core.repeatDue({ since: 0, next: 900_000 }, 900_000, prefs), false);  // 15 min écoulées : on arrête
+  assert.equal(core.repeatDue({ since: 0, next: 900_000 }, 900_000, { ...prefs, repeat_max_min: 0 }), true);  // jamais
+  assert.equal(core.repeatDue({ since: 0, next: 30_000 }, 30_000, { ...prefs, repeat_s: 0 }), false);  // une seule fois
+});
