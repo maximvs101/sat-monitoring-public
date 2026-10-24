@@ -31,6 +31,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Tuiles d'IRD** : lignes « Image » et « Son » retirées (peu compréhensibles, à la demande de Max) ; l'image et le son restent signalés par le badge d'état (« PAS D'IMAGE », « SON ABSENT »…) et les alertes, et détaillés sur la page de la porteuse.
 - **Version v1.2.2** publiée (corrections des alarmes ci-dessous) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.2, notes en français.
 - **Alarme qui ne s'arrêtait pas** (IRD et FSH4 éteints) : en relançant le service pour un correctif, ses alertes « Appareil injoignable », fermées à l'arrêt puis rouvertes, sonnaient de nouveau toutes les 30 s dans les pages ouvertes, sans fin puisque les appareils restaient éteints. Corrigé : alertes fermées par l'arrêt du service marquées « — service arrêté » ; acquittement retenu par appareil et type d'alerte jusqu'à une fin réelle (une alerte rouverte par un redémarrage ne resonne pas) ; alertes en cours au chargement comptées comme acquittées ; répétition arrêtée après 15 min (réglable) ; bouton « Silence 1 h » par appareil. Vérifié sur le service réel : redémarrage avec trois alertes ouvertes, aucun son ; vraie nouvelle panne : alarme ; silence : plus d'alarme pour l'appareil.
 - **Version v1.2.1** publiée (nombre géant écarté) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.1, notes en français.

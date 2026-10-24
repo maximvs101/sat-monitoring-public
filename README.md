@@ -26,7 +26,7 @@ puis **http://localhost:8091**.
 
 ## La page
 
-- **Vue d'ensemble** : chiffres clés, une carte par IRD (état, cause et durée d'un défaut, marge, signal, image, son, température, marge des 10 dernières minutes), événements en cours, plancher de bruit.
+- **Vue d'ensemble** : chiffres clés, une carte par IRD (état, cause et durée d'un défaut, marge, signal reçu, température, marge des 10 dernières minutes), événements en cours, plancher de bruit.
 - **Une page par porteuse** : période au choix (Direct, 1 h, 24 h, 7 j, dates libres, ou glisser sur un graphe) ; marge, puissance d'entrée, niveau RF et bande « État » de tous ses IRD sur le même axe ; détails ou résumé de chaque IRD ; ses événements.
 - **Journal** des événements, filtrable ; un clic ouvre la porteuse au moment de l'événement.
 - **Analyseur FSH4** : état, réglages lus, marqueurs et plancher de bruit, pause pour rendre la main sur l'appareil.
