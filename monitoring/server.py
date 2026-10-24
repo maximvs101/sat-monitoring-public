@@ -218,6 +218,11 @@ def make_server(app: App) -> ThreadingHTTPServer:
                 return self._error(400, str(e))
             if url.path == "/api/live":
                 return self._live()
+            if url.path.startswith("/api/ird/") and url.path.endswith("/image.jpg"):
+                image = app.thumbnail(unquote(url.path[len("/api/ird/"):-len("/image.jpg")]))
+                if image is None:
+                    return self._error(404, "pas d'image")
+                return self._send(200, image, "image/jpeg", headers=(("Cache-Control", "no-store"),))
             if url.path.startswith("/api/"):
                 return self._error(404, "inconnu")
             return self._static(url.path)

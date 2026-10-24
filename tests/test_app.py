@@ -33,6 +33,7 @@ class FakeIrds:
         self.samples = {"S1": sample(), "S2": sample(), "S3": sample(rf_khz=11_220_806, pol=None)}
         self.health = {}  # série → IrdHealth renvoyé avec la prochaine lecture
         self.logs = {}    # série → messages du journal renvoyés avec la prochaine lecture
+        self.thumbs = {}  # série → aperçu JPEG renvoyé avec chaque lecture
 
     def factory(self, entry, cfg):
         def identify():
@@ -44,7 +45,8 @@ class FakeIrds:
             serial, _ = identify()
             if entry.serial and serial != entry.serial:
                 raise IrdError(f"autre appareil à cette adresse (n° {serial})")
-            return IrdReading(self.samples[serial], self.health.get(serial), self.logs.get(serial))
+            return IrdReading(self.samples[serial], self.health.get(serial), self.logs.get(serial),
+                              self.thumbs.get(serial))
 
         return read, identify
 
@@ -87,6 +89,57 @@ class AppTest(unittest.TestCase):
         self.assertEqual(st["irds"]["S1"]["name"], "IRD 1")
         [carrier] = st["carriers"]
         self.assertEqual((carrier["key"], carrier["irds"]), ("125830-V", ["S1", "S2"]))
+
+    def test_thumb_kept_and_timestamped_on_change(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        published = []
+        app.bus.publish = published.append
+        self.irds.thumbs["S1"] = b"\xff\xd8image1"
+        self.step_irds(app)
+        first = [m for m in published if m["type"] == "ird"][-1]["thumb_ts"]
+        self.assertIsNotNone(first)
+        self.assertEqual(app.thumbnail("S1"), b"\xff\xd8image1")
+        time.sleep(0.01)
+        self.step_irds(app)  # même image (IRD figé) : son heure ne bouge pas
+        self.assertEqual([m for m in published if m["type"] == "ird"][-1]["thumb_ts"], first)
+        time.sleep(0.01)
+        self.irds.thumbs["S1"] = b"\xff\xd8image2"
+        self.step_irds(app)
+        last = [m for m in published if m["type"] == "ird"][-1]
+        self.assertGreater(last["thumb_ts"], first)
+        self.assertEqual(last["thumb_ts"], last["ts"])
+        self.assertEqual(app.thumbnail("S1"), b"\xff\xd8image2")
+
+    def test_thumb_absent_reading_keeps_previous(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.thumbs["S1"] = b"\xff\xd8image1"
+        self.step_irds(app)
+        del self.irds.thumbs["S1"]  # lecture sans aperçu (entre deux, ou aperçu en échec)
+        self.step_irds(app)
+        self.assertEqual(app.thumbnail("S1"), b"\xff\xd8image1")
+
+    def test_thumb_dropped_on_remove(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.thumbs["S1"] = b"\xff\xd8image1"
+        self.step_irds(app)
+        app.remove_ird("S1")
+        self.assertIsNone(app.thumbnail("S1"))
+
+    def test_late_reading_after_remove_stores_no_thumb(self):
+        # Lecture partie avant le retrait, traitée après : aucune image ne doit renaître pour l'IRD retiré.
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        app.remove_ird("S1")
+        app._on_ird("S1", 1_000, IrdReading(sample(), thumb=b"\xff\xd8tard"))
+        self.assertIsNone(app.thumbnail("S1"))
+        self.assertNotIn("S1", app.thumbs)
+
+    def test_status_has_thumb_ts(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
+        self.irds.thumbs["S1"] = b"\xff\xd8image1"
+        self.step_irds(app)
+        irds = app.status()["irds"]
+        self.assertIsNotNone(irds["S1"]["latest"]["thumb_ts"])
+        self.assertIsNone(irds["S2"]["latest"]["thumb_ts"])
 
     def test_unlocked_ird_keeps_carrier_symbol_rate(self):
         # Pendant un décrochage, la porteuse garde le débit symbole du dernier lock (largeur de bande, tolérance).

@@ -16,6 +16,8 @@ REFRESH_BODY = b"xml=<refresh/>"
 STATUS_BODY = b'xml=<status type="status"/>'
 LOGS_BODY = b'xml=<logs type="logs"/>'
 EXTRAS_TIMEOUT_S = 1.0  # état matériel et journal : requêtes annexes, courtes
+THUMB_EVERY_S = 2.5  # aperçu de l'image décodée : l'IRD le régénère toutes les 2 à 3 s
+THUMB_MAX_BYTES = 200_000  # un aperçu 320×180 fait ~13 ko : au-delà, ce n'est pas un aperçu
 ACTIVE_SAT = "presets/v1[@id='0']/channel/input/sat"  # configuration d'entrée satellite active
 BER_SCALE = 1e8  # l'IRD donne le BER × 1e8 (son interface affiche ber / 1e8, et « < 1e-8 » pour 0)
 
@@ -113,6 +115,7 @@ class IrdReading:
     sample: IrdSample
     health: IrdHealth | None = None  # toutes les 10 s seulement
     logs: list | None = None         # idem
+    thumb: bytes | None = None       # aperçu JPEG de l'image décodée, toutes les 2,5 s seulement
 
 
 def band_state(s: IrdSample) -> int:
@@ -369,15 +372,52 @@ class IrdClient:
     def logs(self) -> list:
         return parse_logs(self._post(LOGS_BODY, EXTRAS_TIMEOUT_S))
 
+    def thumbnail(self) -> bytes:
+        """Aperçu JPEG de l'image décodée, celui du « Decoding preview » de l'interface (simple lecture)."""
+        url = f"http://{self.host}/thumbnail.jpg?forceRefresh={int(time.time() * 1000)}"
+        # Le délai du socket vaut pour chaque morceau : la requête entière est bornée à part, pour ne jamais retenir
+        # la lecture de l'IRD plus d'une seconde.
+        deadline = time.monotonic() + EXTRAS_TIMEOUT_S
+        try:
+            with open_url(urllib.request.Request(url), timeout=EXTRAS_TIMEOUT_S) as resp:
+                if resp.status != 200:
+                    raise IrdError(f"aperçu : HTTP {resp.status}")
+                data = b""
+                while len(data) <= THUMB_MAX_BYTES:
+                    chunk = resp.read1(THUMB_MAX_BYTES + 1 - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
+                    if time.monotonic() > deadline:
+                        raise IrdError("aperçu : réponse trop lente")
+        except urllib.error.HTTPError as e:
+            if e.code == 503:
+                raise IrdBusy("IRD occupé (HTTP 503)") from e
+            raise IrdError(f"aperçu : HTTP {e.code}") from e
+        except (urllib.error.URLError, OSError) as e:
+            raise IrdError(f"aperçu injoignable : {e}") from e
+        except http.client.HTTPException as e:
+            raise IrdError(f"aperçu : réponse HTTP invalide ({type(e).__name__})") from e
+        if len(data) > THUMB_MAX_BYTES:
+            raise IrdError("aperçu : image trop grande")
+        # Début et fin de JPEG : une image coupée en route ne s'affiche pas à moitié. La fin est cherchée, pas exigée en
+        # dernier : des octets peuvent suivre le marqueur de fin.
+        if not data.startswith(b"\xff\xd8") or b"\xff\xd9" not in data[2:]:
+            raise IrdError("aperçu : pas une image JPEG complète")
+        return data
+
 
 class IrdReader:
     """Lit un IRD en vérifiant que c'est bien l'appareil attendu (numéro de série), à la première
     lecture et après chaque échec : une autre machine à la même adresse ne doit rien enregistrer."""
 
-    def __init__(self, client: IrdClient, expected_serial: str, extras_every_s: float = 10.0, clock=time.monotonic):
+    def __init__(self, client: IrdClient, expected_serial: str, extras_every_s: float = 10.0, clock=time.monotonic,
+                 thumb_every_s: float = THUMB_EVERY_S):
         self.client = client
         self.expected_serial = expected_serial
         self.extras_every_s = extras_every_s
+        self.thumb_every_s = thumb_every_s
+        self._thumb_at = None
         self.clock = clock  # monotone : un changement d'heure du système ne bloque pas les relevés annexes
         self._verified = False
         self._extras_at = None
@@ -411,7 +451,11 @@ class IrdReader:
             self._verified = False
             raise
         now = self.clock()
+        thumb = None
+        if self._thumb_at is None or now - self._thumb_at >= self.thumb_every_s:
+            self._thumb_at = now
+            thumb = self._extra("aperçu", self.client.thumbnail)
         if self._extras_at is not None and now - self._extras_at < self.extras_every_s:
-            return IrdReading(sample, None, None)
+            return IrdReading(sample, None, None, thumb)
         self._extras_at = now
-        return IrdReading(sample, self._extra("état", self.client.health), self._extra("journal", self.client.logs))
+        return IrdReading(sample, self._extra("état", self.client.health), self._extra("journal", self.client.logs), thumb)

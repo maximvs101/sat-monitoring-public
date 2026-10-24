@@ -16,13 +16,17 @@ from pathlib import Path
 from monitoring.app import App
 from monitoring.config import IrdEntry, PathsConfig, ServerConfig, load_config, save_irds
 from monitoring.fsh import FshReading, FshSettings, MarkerSample
-from monitoring.ird import AudioVoice, IrdDetails, IrdError, IrdHealth, IrdLogMessage, IrdReading, IrdSample
+from monitoring.ird import (THUMB_EVERY_S, AudioVoice, IrdDetails, IrdError, IrdHealth, IrdLogMessage, IrdReading,
+                            IrdSample)
 from monitoring.server import make_server
 
 DEVICES = {"10.0.0.1": ("DEMO-1", "IRD 1"), "10.0.0.2": ("DEMO-2", "IRD 2"), "10.0.0.3": ("DEMO-3", "IRD 3")}
 TUNING = {"DEMO-1": (12_583_023, 7_200_000), "DEMO-2": (12_583_050, 7_200_000), "DEMO-3": (11_220_806, 24_760_000)}
 PROGRAMS = {"DEMO-1": (1, "Programme A"), "DEMO-2": (1, "Programme A"), "DEMO-3": (3, "Programme B")}
 EXTRAS_EVERY_S = 10
+# Mire neutre (jamais une image d'antenne réelle : ce dépôt a une copie publique). Un compteur ajouté après la fin du
+# JPEG, ignoré par le navigateur, en fait une image « nouvelle » à chaque lecture, comme un IRD qui décode.
+DEMO_THUMB = (Path(__file__).parent / "fixtures" / "apercu-demo.jpg").read_bytes()
 
 
 def video_lost(serial: str) -> bool:
@@ -63,16 +67,23 @@ def factory(entry, cfg):
         return DEVICES[entry.host]
 
     last_extras = [0.0]
+    last_thumb = [0.0]
+
+    def thumb(serial):
+        if video_lost(serial) or time.time() - last_thumb[0] < THUMB_EVERY_S:
+            return None  # sans vidéo, la démo n'a plus d'image nouvelle : la carte la grise
+        last_thumb[0] = time.time()
+        return DEMO_THUMB + str(int(time.time() * 1000)).encode()
 
     def read():
         serial, _ = identify()
         if entry.serial and serial != entry.serial:
             raise IrdError("autre appareil")
         if time.time() - last_extras[0] < EXTRAS_EVERY_S:
-            return IrdReading(ird_sample(serial))
+            return IrdReading(ird_sample(serial), thumb=thumb(serial))
         last_extras[0] = time.time()
         health = IrdHealth(47 + random.gauss(0, 0.3), 41 + random.gauss(0, 0.3), False, False, False)
-        return IrdReading(ird_sample(serial), health, ird_logs(serial))
+        return IrdReading(ird_sample(serial), health, ird_logs(serial), thumb(serial))
 
     return read, identify
 

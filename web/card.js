@@ -1,7 +1,7 @@
 "use strict";
 
-// Carte d'IRD, la même partout (vue d'ensemble, page de porteuse) : état en clair, valeurs clés, courbe de marge
-// avec ses seuils, bande « État ». Hors Direct, variante « résumé de la période ». Et la grille qui adapte la taille
+// Carte d'IRD, la même partout (vue d'ensemble, page de porteuse) : état en clair, valeurs clés et aperçu de l'image
+// décodée, courbe de marge avec ses seuils, bande « État ». Hors Direct, variante « résumé de la période ». Et la grille qui adapte la taille
 // des cartes à leur nombre.
 
 const Card = (() => {
@@ -36,13 +36,24 @@ const Card = (() => {
     h.why = el("p", { className: "ird-why" });
     h.sub = el("p", { className: "ird-sub" });
     h.values = el("dl", { className: "ird-values" });
+    h.thumbImg = el("img", { alt: "" });
+    h.thumbCap = el("figcaption");
+    h.thumb = el("figure", { className: "ird-thumb none" }, h.thumbImg, h.thumbCap);
+    h.thumbTs = undefined;  // heure de la dernière image annoncée (chargée une seule fois)
+    h.thumbShown = null;    // heure de l'image affichée : une image qui n'a pas pu être chargée laisse la précédente
+    h.thumb.addEventListener("click", (e) => {
+      if (h.thumbShown == null) return;  // cadre vide : le clic reste celui de la tuile (ouvrir la porteuse)
+      e.stopPropagation();  // la tuile mène à la porteuse ; l'image, elle, s'agrandit sur place
+      enlarge(h);
+    });
     h.chartTitle = el("p", { className: "ird-chart-title" });
     h.spark = el("canvas", { className: "ird-spark" });
     h.band = el("canvas", { className: "ird-band" });
     h.since = el("span");
     const axis = el("p", { className: "ird-axis" }, h.since, el("span", { textContent: "maintenant" }));
     h.chart = el("div", { className: "ird-chart" }, h.chartTitle, h.spark, h.band, axis);
-    h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub, h.values, h.chart);
+    h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub,
+      el("div", { className: "ird-top" }, h.values, h.thumb), h.chart);
     if (onClick) {
       // Atteignable au clavier seulement si elle mène quelque part (Entrée ou Espace).
       h.el.classList.add("link");
@@ -57,6 +68,56 @@ const Card = (() => {
       });
     }
     return h;
+  }
+
+  // Une seule fenêtre d'agrandissement pour toute la page, à la taille réelle de l'aperçu (320×180) ; elle suit les
+  // images de sa carte tant qu'elle est ouverte.
+  let viewer = null;
+  function enlarge(h) {
+    if (!viewer) {
+      const img = el("img", { alt: "" });
+      const cap = el("p");
+      viewer = { dialog: el("dialog", { className: "thumb-viewer" }, img, cap), img, cap, card: null };
+      viewer.dialog.addEventListener("click", () => viewer.dialog.close());
+      document.body.append(viewer.dialog);
+    }
+    viewer.card = h;
+    syncViewer(h);
+    if (!viewer.dialog.open) viewer.dialog.showModal();
+  }
+
+  function syncViewer(h) {
+    if (viewer?.card !== h) return;
+    if (viewer.img.src !== h.thumbImg.src) viewer.img.src = h.thumbImg.src;
+    viewer.img.className = h.thumb.classList.contains("old") ? "old" : "";
+    viewer.cap.textContent = `${h.name.textContent} · ${h.thumbCap.textContent}`;
+  }
+
+  function updateThumb(h, m) {
+    const ts = m?.thumb_ts ?? null;
+    if (ts !== h.thumbTs) {
+      h.thumbTs = ts;
+      if (ts == null) {
+        h.thumbShown = null;
+        h.thumbImg.removeAttribute("src");
+      } else {
+        // Chargée à part, affichée une fois arrivée : pas de cadre vide entre deux images, ni sur un échec.
+        const next = new Image();
+        next.onload = () => {
+          if (h.thumbTs !== ts) return;  // une plus récente est déjà annoncée
+          h.thumbImg.src = next.src;
+          h.thumbShown = ts;
+        };
+        next.src = `/api/ird/${encodeURIComponent(h.serial)}/image.jpg?t=${ts}`;
+      }
+    }
+    const shown = h.thumbShown;
+    const view = thumbView(shown, Date.now(), Store.state.connected);
+    h.thumb.className = `ird-thumb ${view.state}`;
+    h.thumbCap.textContent = shown == null ? view.prefix : view.prefix + fmtTime(shown);
+    h.thumb.title = shown == null ? "" : "Agrandir l'image";
+    h.thumb.hidden = false;
+    syncViewer(h);
   }
 
   function fit(canvas) {
@@ -152,6 +213,7 @@ const Card = (() => {
     node.replaceChildren(...rows.map(([k, v, hint, tone]) => {
       const dd = el("dd", { textContent: v, className: tone || "" });
       if (hint) dd.append(el("small", { textContent: hint }));
+      dd.title = [v, hint].filter(Boolean).join(" · ");  // texte complet au survol : à côté de l'aperçu, il peut être coupé
       return el("div", {}, el("dt", { textContent: k }), dd);
     }));
   }
@@ -191,6 +253,7 @@ const Card = (() => {
       ["Signal reçu", live && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—", "puissance d'entrée"],
       [compact ? "Temp." : "Température", live && m.health?.fpga_temp != null ? `${Math.round(m.health.fpga_temp)} °C` : "—", "FPGA"],
     ]);
+    updateThumb(h, m);
     h.chart.hidden = false;
     h.chartTitle.textContent = `Marge sur ${cfg.live_window_min} min`;
     h.since.textContent = `il y a ${cfg.live_window_min} min`;
@@ -214,6 +277,7 @@ const Card = (() => {
       ["BER, son, marge", fmtDuration(summary.state_ms[1]), "dégradé", summary.state_ms[1] ? "warn" : ""],
     ]);
     h.chart.hidden = true;
+    h.thumb.hidden = true;  // aucune image n'est gardée : rien à montrer pour une période passée
   }
 
   // Colonnes et échelle qui remplissent au mieux la place disponible pour n cartes d'une hauteur de référence.

@@ -203,3 +203,11 @@ test("répétition de l'alarme : toutes les N s, arrêtée après la durée maxi
   assert.equal(core.repeatDue({ since: 0, next: 900_000 }, 900_000, { ...prefs, repeat_max_min: 0 }), true);  // jamais
   assert.equal(core.repeatDue({ since: 0, next: 30_000 }, 30_000, { ...prefs, repeat_s: 0 }), false);  // une seule fois
 });
+
+test("aperçu de l'image décodée : récent, ancien, absent", () => {
+  assert.deepEqual(core.thumbView(null, NOW, true), { state: "none", prefix: "pas d'image" });
+  assert.deepEqual(core.thumbView(NOW - 3000, NOW, true), { state: "fresh", prefix: "image " });
+  assert.equal(core.thumbView(NOW - 10_000, NOW, true).state, "fresh");
+  assert.deepEqual(core.thumbView(NOW - 11_000, NOW, true), { state: "old", prefix: "image de " });
+  assert.equal(core.thumbView(NOW - 3000, NOW, false).state, "old");  // direct coupé : plus rien ne dit qu'elle est à jour
+});

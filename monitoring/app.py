@@ -134,6 +134,8 @@ class App:
         self.read_pols = {}   # numéro de série → polarisation lue sur l'IRD (s'il alimente le LNB)
         self.details = {}     # numéro de série → dernier IrdDetails (affiché, pas enregistré)
         self.ird_loops = {}   # numéro de série → DeviceLoop
+        self.thumbs = {}      # numéro de série → (heure de réception d'une image nouvelle, JPEG) : mémoire seulement
+        self._thumbs_lock = threading.Lock()  # fils d'IRD et fil de la page
         self.pending = []     # IRD de config.toml pas encore identifiés (ancien format)
         self._carriers_sig = None
         self._carriers_lock = threading.RLock()  # calcul et publication des porteuses (plusieurs fils d'IRD)
@@ -241,6 +243,8 @@ class App:
                 loop.join(5)
             for per_ird in (self.tunings, self.details, self.hosts, self.pols, self.read_pols):
                 per_ird.pop(serial, None)
+            with self._thumbs_lock:
+                self.thumbs.pop(serial, None)
             name = self.names.pop(serial, serial)
             self._save_irds()
             with self._detect_lock:
@@ -370,10 +374,25 @@ class App:
                      for s, loop in loops],
         }
 
+    def thumbnail(self, serial: str) -> bytes | None:
+        with self._thumbs_lock:
+            kept = self.thumbs.get(serial)
+        return kept[1] if kept else None
+
+    def _thumb_ts(self, serial: str) -> int | None:
+        with self._thumbs_lock:
+            kept = self.thumbs.get(serial)
+        return kept[0] if kept else None
+
     def _on_ird(self, serial, ts, reading: IrdReading):
         if serial not in self.ird_loops:
             return  # lecture arrivée après le retrait de l'IRD
         s, health = reading.sample, reading.health
+        if reading.thumb is not None:
+            with self._thumbs_lock:
+                # L'heure est celle d'une image nouvelle : un aperçu figé garde la sienne, et la page le grise.
+                if serial in self.ird_loops and self.thumbs.get(serial, (None, None))[1] != reading.thumb:
+                    self.thumbs[serial] = (ts, reading.thumb)
         self.read_pols[serial] = s.polarization
         self.details[serial] = s.details
         if self.pols.get(serial):  # la polarisation imposée par l'opérateur prime sur celle lue
@@ -403,7 +422,8 @@ class App:
                 events += self.detector.on_logs(ts, serial, reading.logs)
             events += self.detector.on_alone(ts, carriers, self._reachable() | {serial})
         self.bus.publish({"type": "ird", "ts": ts, "serial": serial, "name": name, **asdict(s), "state": band_state(s),
-                          "health": None if health is None else {"ts": ts, **asdict(health)}})
+                          "health": None if health is None else {"ts": ts, **asdict(health)},
+                          "thumb_ts": self._thumb_ts(serial)})
         self._publish_events(events)
         self._publish_carriers_if_changed(carriers)
 
@@ -466,7 +486,7 @@ class App:
         def with_details(serial):
             row = latest["irds"].get(serial)
             d = details.get(serial)
-            return {**row, "details": asdict(d) if d else None} if row else None
+            return {**row, "details": asdict(d) if d else None, "thumb_ts": self._thumb_ts(serial)} if row else None
 
         return {
             "marker": latest["marker"],

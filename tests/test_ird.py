@@ -8,14 +8,15 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from monitoring.config import IrdConfig
-from monitoring.ird import (AudioVoice, IrdClient, IrdError, IrdHealth, IrdLogMessage, IrdReader, IrdReading, IrdSample,
-                            band_state, parse_health, parse_logs, parse_refresh, parse_status)
+from monitoring.ird import (THUMB_MAX_BYTES, AudioVoice, IrdBusy, IrdClient, IrdError, IrdHealth, IrdLogMessage,
+                            IrdReader, IrdReading, IrdSample, band_state, parse_health, parse_logs, parse_refresh, parse_status)
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "ird_refresh.xml").read_bytes()
 PRESETS = (Path(__file__).parent / "fixtures" / "ird_refresh_presets.xml").read_bytes()
 DECODE = (Path(__file__).parent / "fixtures" / "ird_refresh_decode.xml").read_bytes()
 STATUS = (Path(__file__).parent / "fixtures" / "ird_status.xml").read_bytes()
 LOGS = (Path(__file__).parent / "fixtures" / "ird_logs.xml").read_bytes()
+JPEG = b"\xff\xd8\xff\xe0" + b"x" * 100 + b"\xff\xd9"
 
 
 def status_xml(serial="1000-00001", name="IRD 1", vendor="Ateme"):
@@ -71,9 +72,13 @@ class ParseTest(unittest.TestCase):
 class FakeIrd:
     """Faux DR5000 : répond à <status/> avec `serial` et à <refresh/> avec `refresh`."""
 
-    def __init__(self, delay_s=0.0, status=200, refresh=FIXTURE, serial="1000-00001", extras_status=200):
+    def __init__(self, delay_s=0.0, status=200, refresh=FIXTURE, serial="1000-00001", extras_status=200, thumb=JPEG,
+                 thumb_status=200, thumb_delay_s=0.0, thumb_chunk_s=0.0):
         outer = self
         self.bodies = []
+        self.gets = []
+        self.thumb = thumb
+        self.thumb_status = thumb_status
         self.serial = serial
         self.refresh = refresh
         self.status = status
@@ -99,6 +104,26 @@ class FakeIrd:
                 else:
                     self.wfile.write(outer.refresh)
 
+            def do_GET(self):
+                outer.gets.append(self.path)
+                if not self.path.startswith("/thumbnail.jpg"):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                time.sleep(thumb_delay_s)
+                self.send_response(outer.thumb_status)
+                self.send_header("Content-Type", "image/jpeg")
+                self.end_headers()
+                if outer.thumb_status != 200:
+                    return
+                if not thumb_chunk_s:
+                    self.wfile.write(outer.thumb)
+                    return
+                for i in range(0, len(outer.thumb), 10):  # au compte-gouttes : chaque morceau arrive avant le délai
+                    self.wfile.write(outer.thumb[i:i + 10])
+                    self.wfile.flush()
+                    time.sleep(thumb_chunk_s)
+
             def log_message(self, *a):
                 pass
 
@@ -123,6 +148,52 @@ class ClientTest(unittest.TestCase):
         ctype, body = srv.bodies[0]
         self.assertEqual(body, b"xml=<refresh/>")
         self.assertEqual(ctype, "text/plain; charset=utf-8")
+
+    def test_thumbnail_returns_jpeg(self):
+        srv = FakeIrd()
+        self.addCleanup(srv.stop)
+        self.assertEqual(IrdClient(srv.host, IrdConfig()).thumbnail(), JPEG)
+        self.assertTrue(srv.gets[0].startswith("/thumbnail.jpg?forceRefresh="), srv.gets)
+
+    def test_thumbnail_rejects_non_jpeg(self):
+        srv = FakeIrd(thumb=b"<html>erreur</html>")
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
+
+    def test_thumbnail_rejects_oversized(self):
+        srv = FakeIrd(thumb=b"\xff\xd8" + b"x" * THUMB_MAX_BYTES)
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
+
+    def test_thumbnail_rejects_empty(self):
+        srv = FakeIrd(thumb=b"")
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
+
+    def test_thumbnail_rejects_truncated(self):
+        # Connexion coupée en cours d'envoi : début de JPEG sans marqueur de fin.
+        srv = FakeIrd(thumb=JPEG[:-2])
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
+
+    def test_thumbnail_whole_request_time_bounded(self):
+        # Chaque morceau arrive à temps, mais l'ensemble dépasserait 1 s : abandon, la lecture de l'IRD n'attend pas.
+        srv = FakeIrd(thumb=JPEG, thumb_chunk_s=0.2)
+        self.addCleanup(srv.stop)
+        t0 = time.monotonic()
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
+        self.assertLess(time.monotonic() - t0, 1.6)
+
+    def test_thumbnail_busy(self):
+        srv = FakeIrd(thumb_status=503)
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdBusy):
+            IrdClient(srv.host, IrdConfig()).thumbnail()
 
     def test_fetch_ignores_system_proxy(self):
         # PC d'entreprise avec proxy : les IRD du réseau local ne doivent jamais passer par lui.
@@ -335,6 +406,38 @@ class ReaderTest(unittest.TestCase):
         self.assertIsNone(r.logs)
         now[0] = 110.0
         self.assertIsNotNone(reader.read().health)
+
+    def test_reader_returns_thumb_every_2_5s(self):
+        srv = FakeIrd(refresh=DECODE)
+        self.addCleanup(srv.stop)
+        now = [100.0]
+        reader = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001", clock=lambda: now[0])
+        self.assertEqual(reader.read().thumb, JPEG)
+        now[0] = 101.0
+        self.assertIsNone(reader.read().thumb)
+        now[0] = 102.5
+        self.assertEqual(reader.read().thumb, JPEG)
+
+    def test_reader_thumb_busy_keeps_sample(self):
+        srv = FakeIrd(refresh=DECODE, thumb_status=503)
+        self.addCleanup(srv.stop)
+        r = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001").read()
+        self.assertEqual(r.sample.program_number, 1)
+        self.assertIsNone(r.thumb)
+
+    def test_reader_thumb_timeout_keeps_sample(self):
+        srv = FakeIrd(refresh=DECODE, thumb_delay_s=1.5)
+        self.addCleanup(srv.stop)
+        r = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001").read()
+        self.assertEqual(r.sample.program_number, 1)
+        self.assertIsNone(r.thumb)
+
+    def test_reader_thumb_failure_keeps_sample(self):
+        srv = FakeIrd(refresh=DECODE, thumb_status=500)
+        self.addCleanup(srv.stop)
+        r = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001").read()
+        self.assertEqual(r.sample.program_number, 1)
+        self.assertIsNone(r.thumb)
 
     def test_reader_extras_failure_keeps_sample(self):
         srv = FakeIrd(refresh=DECODE, extras_status=500)

@@ -207,6 +207,16 @@ function alarmFor(ev, { prefs, ackedKeys, muted, now }) {
 
 // Répéter l'alarme maintenant ? `r` : { since (début de l'alarme), next (prochaine répétition) } ; arrêt après
 // `repeat_max_min` minutes (0 = jamais), pas de répétition si `repeat_s` vaut 0.
+// Aperçu de l'image décodée : son heure est celle de la dernière image nouvelle reçue par le service. Ancienne
+// (IRD figé, injoignable, ou direct coupé), la carte la grise ; la page compose « préfixe + heure ».
+const THUMB_STALE_MS = 10_000;
+
+function thumbView(thumbTs, now, connected) {
+  if (thumbTs == null) return { state: "none", prefix: "pas d'image" };
+  if (connected && now - thumbTs <= THUMB_STALE_MS) return { state: "fresh", prefix: "image " };
+  return { state: "old", prefix: "image de " };
+}
+
 function repeatDue(r, now, prefs) {
   if (!prefs.repeat_s || now < r.next) return false;
   return !prefs.repeat_max_min || now - r.since < prefs.repeat_max_min * 60_000;
@@ -214,5 +224,5 @@ function repeatDue(r, now, prefs) {
 
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView };
 }

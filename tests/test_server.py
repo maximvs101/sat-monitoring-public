@@ -374,6 +374,23 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.get("/api/fsh/pause")[0], 404)
         self.assertEqual(self.post("/api/devices", {})[0], 404)  # ancienne route retirée
 
+    def test_ird_image_route(self):
+        self.irds.thumbs["S1"] = b"\xff\xd8image"
+        self.step()
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", "/api/ird/S1/image.jpg")
+        r = c.getresponse()
+        body = r.read()
+        c.close()
+        self.assertEqual((r.status, r.getheader("Content-Type"), r.getheader("Cache-Control")),
+                         (200, "image/jpeg", "no-store"))
+        self.assertEqual(body, b"\xff\xd8image")
+
+    def test_ird_image_404(self):
+        self.step()
+        self.assertEqual(self.get("/api/ird/S9/image.jpg")[0], 404)  # IRD inconnu
+        self.assertEqual(self.get("/api/ird/S1/image.jpg")[0], 404)  # pas encore d'image
+
 
 class StartupTest(unittest.TestCase):
     def test_startup_message_lists_devices(self):

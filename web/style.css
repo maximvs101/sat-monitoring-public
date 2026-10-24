@@ -173,6 +173,27 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ird-values dd small { margin-left: calc(6px * var(--s)); font-weight: 400; font-size: calc(11px * var(--s)); color: var(--muted); }
 .ird-values dd.bad { color: var(--bad-text); } .ird-values dd.violet { color: var(--violet-text); } .ird-values dd.warn { color: var(--warn-text); }
+/* Valeurs et aperçu côte à côte ; carte trop étroite (page de porteuse à trois IRD) : l'aperçu passe dessous. */
+.ird-top { display: flex; flex-wrap: wrap; align-items: flex-start; gap: calc(4px * var(--s)) calc(10px * var(--s)); }
+.ird-top > .ird-values { flex: 1 1 calc(160px * var(--s)); min-width: 0; }
+.ird-thumb { flex: none; width: calc(100px * var(--s)); margin: calc(2px * var(--s)) 0 0; cursor: zoom-in; }
+.ird-thumb[hidden] { display: none; }
+.ird-thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm);
+  background: var(--bg); border: 1px solid var(--border); box-sizing: border-box; }
+.ird-thumb figcaption { font-size: calc(10px * var(--s)); color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ird-thumb.old img { filter: grayscale(1); opacity: .55; }
+.ird-thumb.none { cursor: default; }
+.ird-thumb.none img { display: none; }
+.ird-thumb.none::before { content: ""; display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px dashed var(--border);
+  border-radius: var(--radius-sm); box-sizing: border-box; }
+.ird-grid.compact .ird-thumb { width: calc(80px * var(--s)); }
+.thumb-viewer { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
+  color: var(--text); cursor: zoom-out; }
+.thumb-viewer::backdrop { background: rgb(0 0 0 / .5); }
+.thumb-viewer img { display: block; width: 320px; height: 180px; }
+.thumb-viewer img.old { filter: grayscale(1); opacity: .55; }
+.thumb-viewer p { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
 .ird-card > .ird-chart { flex: 1 1 auto; min-height: calc(56px * var(--s)); display: flex; flex-direction: column; }
 .ird-chart-title { margin: 0; color: var(--muted); font-size: calc(11px * var(--s)); }
 .ird-spark { width: 100%; flex: 1; min-height: 0; }
