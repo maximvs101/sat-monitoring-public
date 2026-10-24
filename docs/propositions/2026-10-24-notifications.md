@@ -1,6 +1,6 @@
 # Proposition : notifications des alertes
 
-*24 octobre 2026 — proposition à discuter. Fait le 24/10 : le son et la notification dans la page (Réglages › Notifications). Le reste n'est pas développé.*
+*24 octobre 2026. Seul le son et la notification dans la page ont été faits (Réglages › Notifications) ; le reste de la proposition n'est pas poursuivi (décision de Max, 24/10).*
 
 ## Le besoin
 

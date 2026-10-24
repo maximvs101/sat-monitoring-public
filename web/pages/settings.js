@@ -316,9 +316,7 @@ const SettingsPage = (() => {
       el("label", { className: "field" }, "Volume", volume),
       el("div", { className: "form-row" }, button("Tester l'alarme", () => { Alerts.unlock(); setTimeout(() => Alerts.play("alarm"), 100); }, { small: true }),
         button("Tester le bip", () => { Alerts.unlock(); setTimeout(() => Alerts.play("beep"), 100); }, { small: true }))),
-    cardBox("Notifications du navigateur", browser),
-    cardBox("Autres canaux", el("p", { className: "muted note",
-      textContent: "Teams, ntfy, Telegram, e-mail, supervision : proposés dans docs/propositions/2026-10-24-notifications.md, pas encore disponibles." })));
+    cardBox("Notifications du navigateur", browser));
   }
 
   async function refresh() {

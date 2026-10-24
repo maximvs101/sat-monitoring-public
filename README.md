@@ -63,5 +63,5 @@ node --test "web/tests/*.test.js"
 
 - [docs/GUIDE.md](docs/GUIDE.md) : guide d'utilisation détaillé.
 - [docs/HISTORIQUE.md](docs/HISTORIQUE.md) : évolutions, essais sur site, points à faire.
-- `docs/propositions/` : propositions à discuter avant développement (notifications…).
+- `docs/propositions/` : proposition de notifications (seul le son dans la page a été fait).
 - `docs/superpowers/` : conceptions et plans de chaque étape (prototype, plusieurs porteuses, état des IRD, refonte de la page).

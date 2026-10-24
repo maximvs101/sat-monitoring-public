@@ -12,16 +12,10 @@
 
 ## À faire
 
-- FSH4 192.168.10.99 : licence FSH-K40 à obtenir (ou remettre l'ancien FSH4 en V1.20).
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
 - Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
-- Pistes pour la suite :
-  - **notifications** des alertes : son dans la page fait (24/10) ; Teams / ntfy / Telegram, e-mail, syslog restent à faire, proposition détaillée dans [propositions/2026-10-24-notifications.md](propositions/2026-10-24-notifications.md), questions à trancher avec Max avant de développer ;
-  - suivi des encodeurs Kyrion CM5000 en lecture seule (sorties SRT : RTT, retransmissions, débit ; sorties ASI) par la même requête que leur page (`getStatus`) ;
-  - rapport de période par porteuse (disponibilité, coupures, marges minimales), imprimable ou exportable ;
-  - service Windows (démarrage au boot sans fenêtre, redémarrage automatique).
 - Limites assumées (pas des défauts à corriger) :
   - FSH4 V1.20 : il reste un aller-retour réseau entre « marqueur allumé ? » et la lecture de sa fréquence ou de son niveau ; un marqueur éteint par l'opérateur exactement à ce moment serait rallumé (le protocole n'a pas de lecture atomique ; touches verrouillées en mode Remote) ;
   - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
@@ -30,6 +24,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Pistes abandonnées** (à la demande de Max) : notifications à distance (Teams, ntfy, Telegram, e-mail, supervision), licence FSH-K40, suivi des encodeurs Kyrion CM5000, rapport de période, service Windows. Le son des alertes dans la page reste en place.
 - **Exécutable Windows essayé sur un PC** : `MonitoringSat.exe` fonctionne (confirmé par Max).
 - **Version v1.2.3** publiée (tuiles d'IRD ci-dessous) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.2.3, notes en français.
 - **Tuiles d'IRD** : lignes « Image » et « Son » retirées (peu compréhensibles, à la demande de Max) ; l'image et le son restent signalés par le badge d'état (« PAS D'IMAGE », « SON ABSENT »…) et les alertes, et détaillés sur la page de la porteuse.
