@@ -79,6 +79,11 @@ class StoreTest(unittest.TestCase):
         self.assertIn(0, s["locked"])
         self.assertEqual(s["locked"].count(0), 1)
 
+    def test_huge_number_never_breaks_a_reading(self):
+        # Dernier rempart : un nombre trop grand pour SQLite ne fait pas perdre toute la lecture.
+        self.store.add_ird(1000, "A", replace(ird(), video_bitrate=2**64 - 1))
+        self.assertEqual(self.store._all("SELECT COUNT(*), MAX(video_bitrate) FROM ird_sat")[0], (1, None))
+
     def test_power_absent_when_unlocked(self):
         # Les anciennes lectures déverrouillées ont 0 dBm (valeur de l'IRD, pas une mesure) : pas de pic à 0 dBm.
         for i in range(10):

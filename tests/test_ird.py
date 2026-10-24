@@ -275,6 +275,14 @@ class DecodeTest(unittest.TestCase):
         d = parse_refresh(data).details
         self.assertEqual(d.audio[0].slot, -1)
 
+    def test_out_of_range_numbers_are_dropped(self):
+        # Pendant un reverrouillage (IRD 1 et 3, 24/10/2026 16:37), l'IRD a envoyé un nombre géant (« -1 » non signé
+        # sur 64 bits, par exemple) : il ne peut pas être enregistré (SQLite : 64 bits signés) et n'a pas de sens.
+        huge = b"18446744073709551615"
+        data = DECODE.replace(b"<bitrate>15677</bitrate>", b"<bitrate>" + huge + b"</bitrate>", 1)
+        s = parse_refresh(data)
+        self.assertIsNone(s.bitrate_kbps)
+
     def test_details_absent_on_old_fixture(self):
         self.assertIsNone(parse_refresh(FIXTURE).details)
 

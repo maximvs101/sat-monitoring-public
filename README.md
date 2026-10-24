@@ -57,7 +57,7 @@ python3 -m unittest discover tests
 node --test "web/tests/*.test.js"
 ```
 
-304 tests Python et 23 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
+306 tests Python et 23 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
 
 ## Documentation
 

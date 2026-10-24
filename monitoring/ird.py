@@ -143,9 +143,13 @@ def _num(el, path, conv, scale=1):
     if raw is None:
         return None
     try:
-        return conv(raw) / scale if scale != 1 else conv(raw)
+        value = conv(raw)
     except ValueError:
         return None
+    # Nombre géant (« -1 » non signé sur 64 bits pendant un reverrouillage, par exemple) : pas une mesure.
+    if conv is int and not -2**63 <= value < 2**63:
+        return None
+    return value / scale if scale != 1 else value
 
 
 def _slot(voice) -> int:

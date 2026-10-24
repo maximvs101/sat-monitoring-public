@@ -139,6 +139,9 @@ class Store:
         d = asdict(s)
         for c in BOOL_COLUMNS:
             d[c] = None if d[c] is None else int(d[c])
+        for c, v in d.items():  # dernier rempart : un entier trop grand pour SQLite ne fait pas perdre la lecture
+            if isinstance(v, int) and not isinstance(v, bool) and not -2**63 <= v < 2**63:
+                d[c] = None
         self._exec(f"INSERT INTO ird_sat (ts, ird, state, {', '.join(IRD_COLUMNS)}) "
                    f"VALUES (?, ?, ?, {', '.join('?' * len(IRD_COLUMNS))})",
                    (ts, serial, band_state(s), *(d[c] for c in IRD_COLUMNS)))
