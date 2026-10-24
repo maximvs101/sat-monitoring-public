@@ -30,7 +30,8 @@ puis **http://localhost:8091**.
 - **Une page par porteuse** : période au choix (Direct, 1 h, 24 h, 7 j, dates libres, ou glisser sur un graphe) ; marge, puissance d'entrée, niveau RF et bande « État » de tous ses IRD sur le même axe ; détails ou résumé de chaque IRD ; ses événements.
 - **Journal** des événements, filtrable ; un clic ouvre la porteuse au moment de l'événement.
 - **Analyseur FSH4** : état, réglages lus, marqueurs et plancher de bruit, pause pour rendre la main sur l'appareil.
-- **Réglages** : appareils, porteuses, seuils d'alerte sur la marge.
+- **Réglages** : appareils, porteuses, seuils d'alerte sur la marge, son des alertes.
+- **Son des alertes** : alarme répétée pour une alerte critique jusqu'à « Acquitter », bip pour un avertissement, notification du navigateur en option.
 
 Tout le détail (alertes et leurs seuils, marqueurs, réglages, données, API) : **[docs/GUIDE.md](docs/GUIDE.md)**.
 
@@ -56,7 +57,7 @@ python3 -m unittest discover tests
 node --test "web/tests/*.test.js"
 ```
 
-304 tests Python et 22 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
+304 tests Python et 23 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
 
 ## Documentation
 

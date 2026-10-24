@@ -4,7 +4,7 @@
 // Chargé en premier dans le navigateur (fonctions globales) et testé sous Node (web/tests/core.test.js).
 
 const PAGES = { porteuse: "carrier", journal: "journal", fsh4: "fsh", reglages: "settings" };
-const SETTINGS_TABS = ["appareils", "porteuses", "seuils"];
+const SETTINGS_TABS = ["appareils", "porteuses", "seuils", "notifications"];
 const QUERY_KEYS = { p: "period", ird: "ird", src: "src", open: "open" };
 const FIXED_PERIODS = { "1h": 3_600_000, "24h": 86_400_000, "7j": 7 * 86_400_000, "30j": 30 * 86_400_000 };
 const FIXED_LABELS = { "1h": "1 h", "24h": "24 h", "7j": "7 j", "30j": "30 j" };
@@ -171,7 +171,18 @@ function eventTarget(ev, carriersAt, now, padMs) {
   return null;
 }
 
+// --- Son des alertes dans la page ---
+
+// « alarm » (critique, répétée jusqu'à acquittement), « beep » (avertissement, une fois) ou null. `prefs` : réglages
+// du navigateur { critical, warning }.
+function alertSound(ev, prefs) {
+  if (ev.ts_end != null) return null;
+  if (ev.severity === "critical") return prefs.critical ? "alarm" : null;
+  if (ev.severity === "warning") return prefs.warning ? "beep" : null;
+  return null;
+}
+
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound };
 }

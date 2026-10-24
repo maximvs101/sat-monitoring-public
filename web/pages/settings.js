@@ -4,7 +4,7 @@
 // saisies), Seuils d'alerte. Chaque erreur s'affiche sous le bloc de l'action concernée.
 
 const SettingsPage = (() => {
-  const TITLES = { appareils: "Appareils", porteuses: "Porteuses", seuils: "Seuils d'alerte" };
+  const TITLES = { appareils: "Appareils", porteuses: "Porteuses", seuils: "Seuils d'alerte", notifications: "Notifications" };
   const POL_OPTIONS = [["vertical", "verticale"], ["horizontal", "horizontale"]];
   let route = null;
   let dom = null;
@@ -268,12 +268,62 @@ const SettingsPage = (() => {
       form, err, ok));
   }
 
+  // ----- Notifications (propres à ce navigateur) -----
+
+  function checkbox(label, checked, onChange, help = "") {
+    const box = el("input", { type: "checkbox", checked });
+    box.addEventListener("change", () => onChange(box.checked));
+    const row = el("label", { className: "check" }, box, ` ${label}`);
+    return help ? el("div", {}, row, el("small", { className: "muted help", textContent: help })) : row;
+  }
+
+  function renderNotifications() {
+    const p = Alerts.prefs();
+    const rerender = (changes) => { Alerts.set(changes); renderNotifications(); };
+    const repeat = select([["15", "toutes les 15 s"], ["30", "toutes les 30 s"], ["60", "toutes les minutes"], ["0", "jamais (une seule fois)"]],
+      String(p.repeat_s));
+    repeat.addEventListener("change", () => rerender({ repeat_s: Number(repeat.value) }));
+    const volume = el("input", { type: "range", min: "0.1", max: "1", step: "0.1", value: String(p.volume) });
+    volume.addEventListener("change", () => { Alerts.set({ volume: Number(volume.value) }); Alerts.play("beep"); });
+    const supported = "Notification" in window;
+    const permission = supported ? Notification.permission : "unsupported";
+    const browserNote = !supported ? "Ce navigateur ne propose pas de notifications."
+      : permission === "denied" ? "Refusées dans ce navigateur : à autoriser dans ses réglages pour cette page."
+        : permission === "granted" ? "Autorisées : une notification apparaît même quand l'onglet n'est pas au premier plan."
+          : "Le navigateur demandera l'autorisation.";
+    const browser = checkbox("Notifications du navigateur", p.browser && permission === "granted", async (on) => {
+      if (on && supported && Notification.permission === "default") await Notification.requestPermission();
+      rerender({ browser: on && supported && Notification.permission === "granted" });
+    }, browserNote);
+    if (!supported || permission === "denied") browser.querySelector("input").disabled = true;
+    const lockedNote = p.sound && Alerts.locked()
+      ? el("p", { className: "banner" }, "Le navigateur attend un clic dans la page avant de pouvoir jouer un son. ",
+        button("Activer le son", () => { Alerts.unlock(); setTimeout(renderNotifications, 300); }, { small: true }))
+      : null;
+    dom.body.replaceChildren(cardBox("Son des alertes dans cette page",
+      el("p", { className: "muted note", textContent: "Réglages propres à ce navigateur. Les alertes déjà en cours au chargement de la page ne sonnent pas ; seules celles qui s'ouvrent ensuite." }),
+      ...(lockedNote ? [lockedNote] : []),
+      checkbox("Son activé", p.sound, (on) => rerender({ sound: on })),
+      checkbox("Alarme pour les alertes critiques", p.critical, (on) => rerender({ critical: on }),
+        "Perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable… Répétée jusqu'à « Acquitter » (bandeau en haut de la page) ou la fin de l'alerte."),
+      el("label", { className: "field" }, "Répéter l'alarme", repeat),
+      checkbox("Bip pour les avertissements", p.warning, (on) => rerender({ warning: on }),
+        "BER élevé, chute ou marge basse, son absent… Un seul bip, sans répétition."),
+      el("label", { className: "field" }, "Volume", volume),
+      el("div", { className: "form-row" }, button("Tester l'alarme", () => { Alerts.unlock(); setTimeout(() => Alerts.play("alarm"), 100); }, { small: true }),
+        button("Tester le bip", () => { Alerts.unlock(); setTimeout(() => Alerts.play("beep"), 100); }, { small: true }))),
+    cardBox("Notifications du navigateur", browser),
+    cardBox("Autres canaux", el("p", { className: "muted note",
+      textContent: "Teams, ntfy, Telegram, e-mail, supervision : proposés dans docs/propositions/2026-10-24-notifications.md, pas encore disponibles." })));
+  }
+
   async function refresh() {
     if (!dom) return;
     const mine = ++seq;
     try {
       if (route.tab === "appareils") await renderDevices(mine);
       else if (route.tab === "porteuses") await renderCarriers(mine);
+      else if (route.tab === "notifications") renderNotifications();
       else await renderThresholds(mine);
     } catch (e) {
       if (mine === seq && dom) dom.body.replaceChildren(el("p", { className: "error", textContent: `Chargement impossible : ${e.message}` }));

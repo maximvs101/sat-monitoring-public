@@ -66,6 +66,15 @@ La référence d'une chute est la médiane de la minute précédente. Elle est f
 
 Quand le démodulateur décroche, le DR5000 met sa puissance d'entrée, son débit symbole et sa fréquence intermédiaire à 0 et sa modulation à « automatic unknown unknown », et son décodeur garde ses dernières valeurs (voies audio « actives », débit vidéo). L'outil n'en tient pas compte : puissance, modulation, son et détails de décodage s'affichent « — » (seule la configuration des sorties reste), la porteuse garde le débit symbole du dernier lock, et les anciennes lectures à 0 dBm ne sont plus tracées. La marge, elle, est tracée à 0 dB : c'est le décrochage.
 
+## Son des alertes dans la page (Réglages › Notifications)
+
+- **Alerte critique** (perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable…) : alarme à deux tons, répétée toutes les 30 s (réglable : 15 s, 1 min, jamais) jusqu'à ce qu'on clique **Acquitter** dans le bandeau rouge en haut de la page, ou que l'alerte se referme d'elle-même.
+- **Avertissement** (BER élevé, chute ou marge basse, son absent…) : un bip, une seule fois.
+- Seules les alertes qui s'ouvrent après le chargement de la page sonnent : recharger la page ne relance pas l'alarme des alertes déjà en cours.
+- **Son coupé / activé** depuis le menu (sous « en direct ») ; son coupé, le bandeau d'acquittement reste affiché. Les navigateurs n'autorisent le son qu'après un premier clic dans la page : le menu affiche alors « Activer le son ».
+- **Notifications du navigateur** en option (à autoriser) : une notification apparaît même quand l'onglet n'est pas au premier plan ; un clic ouvre la page de l'alerte.
+- Réglages propres à chaque navigateur (enregistrés dans le navigateur, pas dans `config.toml`) : deux postes peuvent avoir des réglages différents.
+
 ## Réglages › Seuils d'alerte : alertes sur la marge
 
 Deux réglages, appliqués tout de suite à tous les IRD et enregistrés dans `config.toml` (`[detect]`) :

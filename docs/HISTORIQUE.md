@@ -2,7 +2,7 @@
 
 ## État actuel (24 octobre 2026)
 
-- Branche `main` ; 304 tests Python et 22 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 304 tests Python et 23 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; il tourne avec le code de la v1.1.0 depuis le 24/10.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés sur le site sur **12 525,5 V** (fréquence configurée) et **sans lock** au 24/10 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
@@ -19,7 +19,7 @@
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
 - Pistes pour la suite :
-  - **notifications** des alertes (son dans la page, Teams / ntfy / Telegram, e-mail, syslog) : proposition détaillée dans [propositions/2026-10-24-notifications.md](propositions/2026-10-24-notifications.md), questions à trancher avec Max avant de développer ;
+  - **notifications** des alertes : son dans la page fait (24/10) ; Teams / ntfy / Telegram, e-mail, syslog restent à faire, proposition détaillée dans [propositions/2026-10-24-notifications.md](propositions/2026-10-24-notifications.md), questions à trancher avec Max avant de développer ;
   - suivi des encodeurs Kyrion CM5000 en lecture seule (sorties SRT : RTT, retransmissions, débit ; sorties ASI) par la même requête que leur page (`getStatus`) ;
   - rapport de période par porteuse (disponibilité, coupures, marges minimales), imprimable ou exportable ;
   - service Windows (démarrage au boot sans fenêtre, redémarrage automatique).
@@ -31,6 +31,7 @@
 ## 24 octobre 2026
 
 - Service relancé (arrêté depuis le 22/10 à 21:06 avec la session).
+- **Son des alertes dans la page** (première étape de la proposition de notifications) : alarme répétée pour une alerte critique jusqu'à « Acquitter » (bandeau rouge en haut de la page) ou sa fermeture, bip pour un avertissement, notification du navigateur en option, son coupable depuis le menu ; nouvelle page Réglages › Notifications (réglages propres à chaque navigateur). Sons fabriqués dans la page (Web Audio), aucun fichier. Vérifié sur la démo : alarme à chaque perte de lock, arrêt seul à la fermeture, plus de répétition après « Acquitter », rien quand le son est coupé.
 - **Version v1.1.0** publiée sur le dépôt public (lots 1 et 2) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.1.0 avec `MonitoringSat-Windows.zip` (10,5 Mo) et notes en français.
 - **Lot 2 de corrections** (tous les autres points des revues, et les mineurs reportés depuis le 22/10) :
   - alertes : référence de chute figée une minute après une alerte (pas deux) ; « IRD seul en défaut » qui devient critique si l'IRD perd ensuite le lock ; pas de « réglage FSH4 modifié » à tort après un changement de FSH4 ; deux porteuses très proches n'ont plus la même clé (« 125830.9-V ») ; liste de porteuses ancienne jamais publiée après une plus récente ; IRD injoignable : lock, BER, marge et journal fermés (« IRD injoignable »), rouverts au retour si besoin ; FSH4 en pause : son « injoignable » fermé ; détail « FSH4 — … » au lieu de « fsh » ; flux d'entrée arrêté : une seule alerte (la cause), plus d'« image perdue » en plus ; heure du système qui recule : délais recalés ; marqueur imposé comme bruit retiré de sa porteuse ; BER à la française (« 1,0e-04 ») ;

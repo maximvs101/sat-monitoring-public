@@ -33,6 +33,7 @@ const Router = (() => {
     } catch (e) {
       console.error(e);
     }
+    Alerts.init($("alarms"));  // après le premier chargement : les alertes déjà en cours ne sonnent pas
     window.addEventListener("hashchange", go);
     go();
   }

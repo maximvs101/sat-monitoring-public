@@ -254,3 +254,19 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .thresholds > div { grid-column: 1 / -1; }
 .ok-note { margin: 0; color: var(--ok-text); font-size: var(--fs-sm); }
 .settings input[placeholder] { min-width: 260px; }
+
+/* --- Alarmes sonores (alerts.js) --- */
+main { min-width: 0; }
+.alarm-banner { position: sticky; top: 0; z-index: 10; background: var(--bad-soft); border-bottom: 2px solid var(--bad);
+  padding: var(--sp-2) var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-1); font-size: var(--fs-md); color: var(--bad-text); }
+.alarm-banner[hidden] { display: none; }
+.alarm-row { display: flex; align-items: center; gap: var(--sp-2); }
+.alarm-row .btn { margin-left: auto; }
+.nav-sound { font: inherit; font-size: var(--fs-xs); text-align: left; background: none; border: 0; padding: 0 var(--sp-2) var(--sp-3);
+  color: var(--muted); cursor: pointer; }
+.nav-sound.off { color: var(--faint); }
+.nav-sound.locked { color: var(--accent); font-weight: 600; }
+.nav-sound:hover { text-decoration: underline; }
+.settings .help { display: block; margin: 2px 0 0 22px; font-size: var(--fs-xs); }
+.settings input[type="range"] { width: 220px; }
+.settings .field select.input { max-width: 260px; }

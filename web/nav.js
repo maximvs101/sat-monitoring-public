@@ -29,6 +29,7 @@ const Nav = (() => {
     root.replaceChildren(
       el("div", { className: "nav-brand", textContent: "Monitoring satellite" }),
       el("div", { className: `nav-live${s.connected ? "" : " off"}`, textContent: s.connected ? "● en direct" : "● connexion perdue" }),
+      Alerts.navButton(),
       item("Vue d'ensemble", routeHref({ page: "overview" }), { active: is("overview"), count: total }),
       el("div", { className: "nav-group", textContent: "Porteuses" }),
       ...(carriers.length ? carriers.map(([key, name, count]) =>
@@ -41,6 +42,7 @@ const Nav = (() => {
       item("Appareils", routeHref({ page: "settings", tab: "appareils" }), { active: is("settings", { tab: "appareils" }) }),
       item("Porteuses", routeHref({ page: "settings", tab: "porteuses" }), { active: is("settings", { tab: "porteuses" }) }),
       item("Seuils d'alerte", routeHref({ page: "settings", tab: "seuils" }), { active: is("settings", { tab: "seuils" }) }),
+      item("Notifications", routeHref({ page: "settings", tab: "notifications" }), { active: is("settings", { tab: "notifications" }) }),
     );
   }
 

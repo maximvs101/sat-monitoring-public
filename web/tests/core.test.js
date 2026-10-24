@@ -162,3 +162,15 @@ test("clé à polarisation inconnue et deux porteuses V et H de même fréquence
   const u = { key: "125830-?", rf_khz: 12_583_000, polarization: null, symbol_rate: 7_200_000 };
   assert.equal(core.matchCarrier([v, h, u], { key: "125830-?" }), u);  // clé exacte d'abord
 });
+
+test("son d'une alerte : critique (alarme répétée), avertissement (un bip), selon les réglages", () => {
+  const prefs = { critical: true, warning: true };
+  const crit = { id: 1, severity: "critical", ts_end: null };
+  const warn = { id: 2, severity: "warning", ts_end: null };
+  assert.equal(core.alertSound(crit, prefs), "alarm");
+  assert.equal(core.alertSound(warn, prefs), "beep");
+  assert.equal(core.alertSound({ id: 3, severity: "info", ts_end: null }, prefs), null);
+  assert.equal(core.alertSound({ ...crit, ts_end: 5 }, prefs), null);  // déjà fermée : rien
+  assert.equal(core.alertSound(warn, { ...prefs, warning: false }), null);
+  assert.equal(core.alertSound(crit, { ...prefs, critical: false }), null);
+});
