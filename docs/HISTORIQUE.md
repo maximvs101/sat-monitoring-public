@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.0** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.0, `MonitoringSat-Windows.zip`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.2** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.2, `MonitoringSat-Windows.zip`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
 
 ## À faire
 
@@ -23,6 +23,7 @@
 
 ## 25 octobre 2026
 
+- **Version v1.3.2** publiée (cartes lisibles, courbes coupées sur les trous de mesure, fonctionnement sans FSH4) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.2, notes en français. Le tag v1.3.1 reste sans release : sa fabrication s'était arrêtée sur un test qui laissait une base ouverte (WinError 32 sous Windows), corrigé.
 - **Analyse sur les IRD .141 et .143, sans FSH4** (demandée par Max) : valeurs affichées comparées à une lecture directe des IRD (identiques : 12 525,5 MHz V, 7,2 MS/s, 8PSK 3/4, marges 6,3 / 6,5 dB, -43 / -42 dBm, AH-ENC-4A H.264 1080i25, 6 et 3 voies son ; l'IRD 1 a deux voies 9 et 10 qui reprennent les PID 102 et 103, c'est sa configuration). Corrigé et ajouté :
   - **courbes interrompues sur les trous de mesure** : la marge, la puissance et les marqueurs traçaient une ligne droite à travers une nuit sans mesure (`alignSeries` : trou = plus de 3 fois le pas habituel et au moins 10 s) ;
   - **alertes en cours fermées à l'heure de l'arrêt** : à l'arrêt propre, à l'heure de l'arrêt ; après un arrêt brutal, à la dernière marque de vie (table `meta`, toutes les 30 s). Avant, une coupure en cours à l'arrêt était enregistrée avec une durée nulle (9 fois le 24/10, dont 8 min réelles à 16:43) ;
