@@ -146,6 +146,23 @@ class StoreTest(unittest.TestCase):
         self.assertEqual(len(ev), 1)
         self.assertEqual(ev[0]["ts_end"], 5000)
 
+    def test_last_ts_includes_alive_mark(self):
+        # IRD et FSH4 injoignables : aucune mesure, mais le service tournait ; c'est l'heure à retenir.
+        self.store.add_ird(1000, "A", ird())
+        self.store.set_alive(9000)
+        self.store.open_event(5000, "device_down", "critical", "ird")
+        self.store.close()
+        self.store = Store(self.path)
+        self.assertEqual(self.store.last_ts(), 9000)
+        self.store.close_open_events(self.store.last_ts())
+        self.assertEqual(self.store.events(0, 10_000)[0]["ts_end"], 9000)
+
+    def test_alive_mark_alone(self):
+        self.assertIsNone(self.store.last_ts())
+        self.store.set_alive(7000)
+        self.store.set_alive(8000)
+        self.assertEqual(self.store.last_ts(), 8000)
+
     def test_reads_do_not_block_writes(self):
         import threading
         held = self.store._pool.get()  # une lecture longue en cours

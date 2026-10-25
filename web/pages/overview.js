@@ -59,9 +59,10 @@ const OverviewPage = (() => {
       kpi("Alertes en cours", String(open.length),
         { tone: open.some((e) => e.severity === "critical") ? "bad" : open.length ? "warn" : "" }),
       kpi("Marge la plus basse", low ? fmt(low.v, 1, "dB") : "—", { small: low ? s.names[low.serial] || low.serial : "" }),
-      kpi("Analyseur FSH4", fshLabel, { tone: fshTone === "bad" ? "bad" : "",
-        foot: el("div", { className: "foot" }, button(s.states.fsh === "paused" ? "Reprendre" : "Pause", () => toggleFshPause(), { small: true }),
-          el("a", { href: routeHref({ page: "fsh" }), textContent: "Analyseur →" })) }),
+      s.states.fsh === "absent" ? kpi("Analyseur FSH4", fshLabel, { small: "pas de FSH4 sur ce site" })
+        : kpi("Analyseur FSH4", fshLabel, { tone: fshTone === "bad" ? "bad" : "",
+          foot: el("div", { className: "foot" }, button(s.states.fsh === "paused" ? "Reprendre" : "Pause", () => toggleFshPause(), { small: true }),
+            el("a", { href: routeHref({ page: "fsh" }), textContent: "Analyseur →" })) }),
     );
   }
 

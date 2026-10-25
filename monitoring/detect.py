@@ -544,9 +544,10 @@ class Detector:
 
     def on_state(self, ts: int, device: str, state: str, detail: str) -> list[dict]:
         """`device` vaut « fsh » ou « ird:<série> »."""
-        if state == "paused" and device == "fsh" and device in self.down_events:
-            # En pause, le FSH4 n'est plus lu : son « injoignable » n'a plus de sens.
-            return [self._close_with_reason(self.down_events.pop(device), ts, "FSH4 en pause")]
+        if state in ("paused", "absent") and device == "fsh" and device in self.down_events:
+            # En pause ou retiré, le FSH4 n'est plus lu : son « injoignable » n'a plus de sens.
+            reason = "FSH4 en pause" if state == "paused" else "FSH4 retiré"
+            return [self._close_with_reason(self.down_events.pop(device), ts, reason)]
         if state == "down" and device not in self.down_events:
             label = detail if detail.startswith("FSH4") else f"FSH4 — {detail}" if detail else "FSH4"
             if device.startswith("ird:"):

@@ -8,7 +8,7 @@ const Card = (() => {
   const STALE_MS = 10_000;
   // Carte de référence (échelle 1), complète puis compacte ; sous l'échelle minimale de la compacte, la page défile.
   const BASE_W = 300, GAP = 12, MAX_SCALE = 2.2;
-  const FULL = { h: 290, min: 0.85 }, COMPACT = { h: 195, min: 0.75 };
+  const FULL = { h: 300, min: 0.85 }, COMPACT = { h: 195, min: 0.75 };
 
   // Depuis quand la rangée « État » garde son code actuel ; au-delà de la fenêtre affichée : « plus de N min ».
   function since(d, now, from, windowMin) {
@@ -52,8 +52,7 @@ const Card = (() => {
     h.since = el("span");
     const axis = el("p", { className: "ird-axis" }, h.since, el("span", { textContent: "maintenant" }));
     h.chart = el("div", { className: "ird-chart" }, h.chartTitle, h.spark, h.band, axis);
-    h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub,
-      el("div", { className: "ird-top" }, h.values, h.thumb), h.chart);
+    h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub, h.values, h.thumb, h.chart);
     if (onClick) {
       // Atteignable au clavier seulement si elle mène quelque part (Entrée ou Espace).
       h.el.classList.add("link");
@@ -153,23 +152,36 @@ const Card = (() => {
       ctx.lineTo(w, y(v));
       ctx.stroke();
     }
-    const line = (level, color, dash, label) => {
-      ctx.strokeStyle = ctx.fillStyle = color;
-      ctx.setLineDash(dash);
+    const lines = [];
+    if (minimum > 0) lines.push({ level: minimum, color: "#dc2626", dash: [], label: `minimum ${fmt(minimum, 1, "dB")}` });
+    if (drop != null && drop > 0) {
+      lines.push({ level: drop, color: "#d97706", dash: [4 * ratio, 3 * ratio], label: "alerte si chute" });
+    }
+    for (const l of lines) {
+      ctx.strokeStyle = l.color;
+      ctx.setLineDash(l.dash);
       ctx.beginPath();
-      ctx.moveTo(left, y(level));
-      ctx.lineTo(w, y(level));
+      ctx.moveTo(left, y(l.level));
+      ctx.lineTo(w, y(l.level));
       ctx.stroke();
       ctx.setLineDash([]);
+    }
+    // Libellés au-dessus de leur ligne (bas du texte), écartés quand les deux seuils sont proches, dessinés après la
+    // courbe avec un liseré blanc : la marge peut passer juste à leur hauteur.
+    const labels = () => {
       if (compact) return;
       ctx.textAlign = "left";
-      const above = y(level) - font - 2 * ratio >= 0;  // libellé au-dessus de la ligne, sinon dessous
-      ctx.textBaseline = above ? "bottom" : "top";
-      ctx.fillText(label, left + 4 * ratio, y(level) + (above ? -2 : 2) * ratio);
+      ctx.textBaseline = "bottom";
+      ctx.lineWidth = 3 * ratio;
+      ctx.strokeStyle = "#ffffff";
+      const ys = spreadLabels(lines.map((l) => y(l.level) - 2 * ratio), font + 2 * ratio, font + ratio, h);
+      lines.forEach((l, i) => {
+        ctx.strokeText(l.label, left + 4 * ratio, ys[i]);
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.label, left + 4 * ratio, ys[i]);
+      });
     };
-    if (minimum > 0) line(minimum, "#dc2626", [], `minimum ${fmt(minimum, 1, "dB")}`);
-    if (drop != null && drop > 0) line(drop, "#d97706", [4 * ratio, 3 * ratio], "alerte si chute");
-    if (!d) return;
+    if (!d) return labels();
     ctx.strokeStyle = "#3341c4";
     ctx.lineWidth = 1.5 * ratio;
     ctx.beginPath();
@@ -184,6 +196,7 @@ const Card = (() => {
       prev = t;
     }
     ctx.stroke();
+    labels();
   }
 
   // Bande « État » sur la même largeur que la courbe (même décalage à gauche).
@@ -211,9 +224,9 @@ const Card = (() => {
     if (node.dataset.sig === sig) return;
     node.dataset.sig = sig;
     node.replaceChildren(...rows.map(([k, v, hint, tone]) => {
-      const dd = el("dd", { textContent: v, className: tone || "" });
+      const dd = el("dd", { className: tone || "" }, el("span", { className: "v", textContent: v }));
       if (hint) dd.append(el("small", { textContent: hint }));
-      dd.title = [v, hint].filter(Boolean).join(" · ");  // texte complet au survol : à côté de l'aperçu, il peut être coupé
+      dd.title = [v, hint].filter(Boolean).join(" · ");  // en entier au survol : en compacte, valeur tronquée et indication masquée
       return el("div", {}, el("dt", { textContent: k }), dd);
     }));
   }
@@ -242,15 +255,16 @@ const Card = (() => {
     const lastCode = d?.state.length ? d.state[d.state.length - 1] : null;
     const cause = title === "OK" ? "" : [why, code === lastCode ? since(d, Date.now(), range[0], cfg.live_window_min) : ""].filter(Boolean).join(" — ");
     h.why.textContent = [cause, openAlerts ? `${openAlerts} alerte${openAlerts > 1 ? "s" : ""} en cours` : ""].filter(Boolean).join(" · ");
-    h.el.title = [h.why.textContent, h.hint].filter(Boolean).join("\n");
     h.sub.textContent = [m?.service_name, carrier ? `porteuse ${carrier.name}` : null].filter(Boolean).join(" · ") || "—";
+    // Cause et programme en entier au survol : sur les tuiles, ils peuvent être tronqués à une ligne.
+    h.el.title = [h.why.textContent, h.sub.textContent, h.hint].filter(Boolean).join("\n");
     const live = m && !down && !stale;
     const thr = dropThreshold(d, cfg);
     const limits = [thr > 0 ? `chute si < ${fmt(thr, 1, "dB")}` : "", minimum > 0 ? `min. ${fmt(minimum, 1, "dB")}` : ""]
       .filter(Boolean).join(" · ");
     setRows(h.values, [
       ["Marge", live ? fmt(m.margin_db, 1, "dB") : "—", (live && limits) || "réserve avant décrochage"],
-      ["Signal reçu", live && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—", "puissance d'entrée"],
+      [compact ? "Signal" : "Signal reçu", live && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—", "puissance d'entrée"],
       [compact ? "Temp." : "Température", live && m.health?.fpga_temp != null ? `${Math.round(m.health.fpga_temp)} °C` : "—", "FPGA"],
     ]);
     updateThumb(h, m);

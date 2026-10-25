@@ -22,7 +22,8 @@ const KINDS = {
   ird_log: "Journal IRD",
 };
 const SEVERITY_TONE = { critical: "bad", warning: "warn", info: "ok" };
-const DEVICE_STATE = { up: ["connecté", "ok"], down: ["injoignable", "bad"], paused: ["en pause", ""], unknown: ["en attente", ""] };
+const DEVICE_STATE = { up: ["connecté", "ok"], down: ["injoignable", "bad"], paused: ["en pause", ""], unknown: ["en attente", ""],
+  absent: ["aucun", ""] };  // absent : pas de FSH4 sur ce site (adresse vide)
 const POL_NAME = { vertical: "verticale", horizontal: "horizontale" };
 // Classe de couleur d'un code de la bande « État » (0 à 3), ou « down » / « idle ».
 const TONE_OF_CODE = { 0: "ok", 1: "warn", 2: "violet", 3: "bad", down: "bad", idle: "" };

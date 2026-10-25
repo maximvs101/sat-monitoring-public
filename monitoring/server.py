@@ -54,7 +54,7 @@ def _polarization(value):
 
 def parse_fsh(body: dict) -> tuple:
     host, port = body.get("host"), body.get("port")
-    if not valid_host(host):
+    if host != "" and not valid_host(host):  # vide : pas de FSH4
         raise ValueError("adresse du FSH4 invalide")
     if isinstance(port, bool) or not isinstance(port, int) or not 1 <= port <= 65535:
         raise ValueError("port du FSH4 invalide")
@@ -111,7 +111,11 @@ def series_carriers(app: App, fsh: dict, irds: dict) -> tuple:
         for pid in c.irds:
             serial, span = periods[pid]
             by_serial.setdefault(serial, []).append(span)
-        out.append({**carrier_view(c, mm, freqs), "irds": list(by_serial), "periods": by_serial})
+        # Ordre des IRD suivis (comme en Direct), puis les anciens IRD.
+        followed = list(app.ird_loops)
+        irds_order = sorted(by_serial, key=lambda serial: (followed.index(serial) if serial in followed else len(followed),
+                                                          serial))
+        out.append({**carrier_view(c, mm, freqs), "irds": irds_order, "periods": by_serial})
     return out, mm
 
 
@@ -254,6 +258,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
                 return self._error(403, "origine refusée")
             if path == "/api/discover":
                 return self._json(app.scanner())
+            if path in ("/api/fsh/pause", "/api/fsh/resume") and app.fsh_absent:
+                return self._error(400, "aucun FSH4 configuré (Réglages › Appareils)")
             if path == "/api/fsh/pause":
                 app.fsh_loop.pause()
                 return self._send(204)
@@ -390,7 +396,8 @@ def install_signal_handlers(sig_module=signal) -> None:
 
 def startup_message(cfg, port: int) -> str:
     irds = ", ".join(f"{e.name} ({e.host})" for e in cfg.irds) or "aucun IRD"
-    return (f"Démarrage : FSH4 {cfg.fsh.host}:{cfg.fsh.port}, IRD : {irds}, "
+    fsh = f"{cfg.fsh.host}:{cfg.fsh.port}" if cfg.fsh.host else "aucun"
+    return (f"Démarrage : FSH4 {fsh}, IRD : {irds}, "
             f"page http://{cfg.server.host}:{port}")
 
 

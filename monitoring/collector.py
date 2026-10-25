@@ -41,6 +41,7 @@ class DeviceLoop(threading.Thread):
         self.failures = 0
         self.busy = 0
         self._paused = threading.Event()
+        self._pause_state = "paused"  # « absent » : appareil retiré de la configuration (pas une simple pause)
         self._pause_applied = False
         self._stopping = threading.Event()
         self._wake = threading.Event()
@@ -73,14 +74,14 @@ class DeviceLoop(threading.Thread):
             self.read, self.close = replacement
             self._reset_counts()
             # En pause, elle le reste : la nouvelle connexion ne s'ouvrira qu'à la reprise.
-            self._set_state(self._now_ms(), "paused" if self._paused.is_set() else "unknown", "")
+            self._set_state(self._now_ms(), self._pause_state if self._paused.is_set() else "unknown", "")
         if self._paused.is_set():
             # Appliquée ici, dans le thread de collecte : jamais de socket fermée en pleine lecture.
             if not self._pause_applied:
                 self._pause_applied = True
                 if self.close is not None:
                     self.close()
-                self._set_state(self._now_ms(), "paused", "")
+                self._set_state(self._now_ms(), self._pause_state, "")
             return PAUSED_POLL_S
         # Pas en pause : la prochaine pause devra s'appliquer (même si une reprise est arrivée au mauvais moment).
         self._pause_applied = False
@@ -126,8 +127,12 @@ class DeviceLoop(threading.Thread):
             self._wake.wait(wait)
             self._wake.clear()
 
-    def pause(self) -> None:
-        """Demande la pause ; la boucle l'applique à sa prochaine itération."""
+    def pause(self, state: str = "paused") -> None:
+        """Demande la pause ; la boucle l'applique à sa prochaine itération. `state` : « paused », ou « absent »
+        pour un appareil retiré de la configuration."""
+        if self._paused.is_set() and state != self._pause_state:
+            self._pause_applied = False  # déjà en pause, mais l'état affiché change (pause ↔ absent)
+        self._pause_state = state
         self._paused.set()
         self._wake.set()
 

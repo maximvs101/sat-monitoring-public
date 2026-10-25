@@ -139,6 +139,9 @@ const CarrierPage = (() => {
     }
     if (carrier.markers.length) {
       charts.rf = Charts.markerChart(rZone, carrier.markers, fsh.freqs, { onSelect, height: 130 });
+    } else if (Store.state.states.fsh === "absent") {
+      rCard.hidden = true;  // pas de FSH4 sur ce site : pas de graphe vide à expliquer
+      dom.rfReason = null;
     } else {
       dom.rfReason = el("p", { className: "muted" });
       rZone.append(dom.rfReason);
@@ -155,7 +158,7 @@ const CarrierPage = (() => {
       charts.band.setData(d.state);
     }
     if (charts.rf) charts.rf.setData(data.fsh);
-    else dom.rfReason.textContent = rfReason();
+    else if (dom.rfReason) dom.rfReason.textContent = rfReason();
     for (const c of [charts.margin, charts.power, charts.band, charts.rf]) if (c) c.setRange(from, to);
   }
 
@@ -246,11 +249,17 @@ const CarrierPage = (() => {
     render();
   }
 
+  // Titre avant que la porteuse soit trouvée : son nom si elle existe en ce moment (la clé brute, « 125254-V », n'est
+  // pas lisible et sa fréquence est tronquée).
+  function keyTitle() {
+    return matchCarrier(Store.state.carriers, { key: route.key })?.name || "Porteuse";
+  }
+
   function notFound(text) {
     carrier = null;
     sigs = {};  // en-tête et événements redessinés si la porteuse revient
     destroyCharts();
-    dom.title.textContent = route.key;
+    dom.title.textContent = keyTitle();
     dom.meta.textContent = "";
     dom.content.hidden = true;
     dom.message.hidden = false;
@@ -321,7 +330,7 @@ const CarrierPage = (() => {
       el("div", { className: "carrier-col" }, dom.charts, dom.irds),
       el("div", { className: "carrier-side" }, cardBox("Événements de la porteuse", dom.events)));
     view.append(el("div", { className: "page" }, crumb, head, dom.polWarning, dom.notes, dom.message, dom.content));
-    dom.title.textContent = route.key;
+    dom.title.textContent = keyTitle();
     window.addEventListener("resize", onResize);
     if (live()) {
       onStore("reload");

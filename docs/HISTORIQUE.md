@@ -2,7 +2,7 @@
 
 ## État actuel (24 octobre 2026)
 
-- Branche `main` ; 325 tests Python et 27 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 336 tests Python et 31 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; il tourne avec le code de la v1.2.0 (la page est servie depuis le dossier du dépôt).
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
@@ -20,6 +20,19 @@
   - FSH4 V1.20 : il reste un aller-retour réseau entre « marqueur allumé ? » et la lecture de sa fréquence ou de son niveau ; un marqueur éteint par l'opérateur exactement à ce moment serait rallumé (le protocole n'a pas de lecture atomique ; touches verrouillées en mode Remote) ;
   - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
   - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable ».
+
+## 25 octobre 2026
+
+- **Analyse sur les IRD .141 et .143, sans FSH4** (demandée par Max) : valeurs affichées comparées à une lecture directe des IRD (identiques : 12 525,5 MHz V, 7,2 MS/s, 8PSK 3/4, marges 6,3 / 6,5 dB, -43 / -42 dBm, AH-ENC-4A H.264 1080i25, 6 et 3 voies son ; l'IRD 1 a deux voies 9 et 10 qui reprennent les PID 102 et 103, c'est sa configuration). Corrigé et ajouté :
+  - **courbes interrompues sur les trous de mesure** : la marge, la puissance et les marqueurs traçaient une ligne droite à travers une nuit sans mesure (`alignSeries` : trou = plus de 3 fois le pas habituel et au moins 10 s) ;
+  - **alertes en cours fermées à l'heure de l'arrêt** : à l'arrêt propre, à l'heure de l'arrêt ; après un arrêt brutal, à la dernière marque de vie (table `meta`, toutes les 30 s). Avant, une coupure en cours à l'arrêt était enregistrée avec une durée nulle (9 fois le 24/10, dont 8 min réelles à 16:43) ;
+  - **fonctionnement sans FSH4** : adresse vide = état « absent » (ni lecture, ni alerte, ni pause), « Analyseur FSH4 : aucun », pas de graphe « Niveau RF » vide ; la dernière mesure d'un FSH4 précédent n'est plus présentée comme celle de l'actuel ;
+  - **étiquettes de seuils** lisibles : écartées quand deux seuils sont proches (IRD 1 et IRD 3 à 4,3 et 4,5 dB, chute et minimum sur les cartes), dessinées après la courbe avec un liseré, et à l'échelle de l'écran (5,5 px sur un écran Retina) ;
+  - ordre des IRD identique en Direct et sur une période passée ; titre lisible pendant le chargement d'une période (au lieu de la clé « 125254-V ») ;
+  - régression du matin corrigée : l'aperçu reprenait la marge de 40 px d'une `<figure>` et débordait de la carte.
+
+- **Lisibilité des cartes d'IRD** (capture de Max sous Windows, 2 IRD en 1920 px) : l'aperçu recouvrait les indications des valeurs et la cause en clair était coupée (« · 1 … »). La carte est maintenant une grille : valeurs sur toute la largeur, aperçu à droite de la courbe de marge (à droite des valeurs en compact, valeurs alors sur une colonne avec « Signal » et « Temp. »), sous la courbe sur une carte de moins de 360 px (page de porteuse étroite) ; une valeur n'est jamais coupée et son indication passe à la ligne d'un bloc ; cause et ligne programme · porteuse sur deux lignes au plus ; détails d'une carte étroite sur une colonne (libellé au-dessus). Vérifié sur la démo en 1920 × 890 (2 IRD, s = 2,1), 900 × 560 (compact) et page de porteuse en 1000 × 700 : aucun texte coupé ni recouvert.
+- **Relecture de ce correctif** : colonne de l'aperçu à largeur fixe (la grille l'élargissait aux dépens des valeurs compactes) ; hauteur de référence des grandes cartes 290 → 300 px (au pire cas — échelle 0,85, cause sur deux lignes, indication de marge à la ligne — la légende de l'aperçu dépassait de 7 px) ; en compact, cause et programme sur une ligne (en entier au survol de la carte) et valeurs alignées ; texte complet des valeurs au survol rétabli ; espacement porté par les éléments (une cause absente n'ajoute plus d'écart) ; résumé de période : la courbe reprend la place de l'aperçu sans dupliquer la grille. Pire cas vérifié sans débordement : grandes cartes à 0,85, 1 et 2,1, compactes à 0,75 et 1,2.
 
 ## 24 octobre 2026
 

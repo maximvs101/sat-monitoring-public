@@ -207,6 +207,52 @@ function alarmFor(ev, { prefs, ackedKeys, muted, now }) {
 
 // Répéter l'alarme maintenant ? `r` : { since (début de l'alarme), next (prochaine répétition) } ; arrêt après
 // `repeat_max_min` minutes (0 = jamais), pas de répétition si `repeat_s` vaut 0.
+// Plusieurs séries sur un même axe de temps (IRD d'une porteuse, marqueurs du FSH4) : [ts, { champ: [une colonne par
+// source] }]. `undefined` là où une source n'a pas de point (la courbe passe par-dessus), `null` juste après un trou de
+// mesure de la source (service arrêté, appareil injoignable, IRD re-réglé) : la courbe s'interrompt au lieu de tracer
+// une ligne droite à travers une période sans mesure. Trou : plus de 3 fois le pas habituel, et au moins 10 s.
+const GAP_MIN_MS = 10_000;
+
+function gapThreshold(ts) {
+  const steps = [];
+  for (let i = 1; i < ts.length; i++) steps.push(ts[i] - ts[i - 1]);
+  if (!steps.length) return GAP_MIN_MS;
+  steps.sort((a, b) => a - b);
+  return Math.max(GAP_MIN_MS, 3 * steps[Math.floor(steps.length / 2)]);
+}
+
+function alignSeries(sources, fields) {
+  const breaks = sources.map((src) => {
+    const limit = gapThreshold(src.ts);
+    const out = [];
+    for (let i = 1; i < src.ts.length; i++) if (src.ts[i] - src.ts[i - 1] > limit) out.push(src.ts[i - 1] + 1);
+    return out;
+  });
+  const ts = [...new Set([...sources.flatMap((src) => src.ts), ...breaks.flat()])].sort((a, b) => a - b);
+  const index = new Map(ts.map((t, i) => [t, i]));
+  const cols = Object.fromEntries(fields.map((f) => [f, sources.map(() => new Array(ts.length).fill(undefined))]));
+  sources.forEach((src, k) => {
+    src.ts.forEach((t, i) => {
+      for (const f of fields) cols[f][k][index.get(t)] = src.values[f]?.[i] ?? null;
+    });
+    for (const t of breaks[k]) for (const f of fields) cols[f][k][index.get(t)] = null;
+  });
+  return [ts, cols];
+}
+
+// Étiquettes de seuils sur un graphe (positions verticales en pixels, vers le bas) : écartées d'au moins `gap` quand
+// leurs lignes sont proches, sans changer leur ordre, dans [min, max]. Renvoyées dans l'ordre d'entrée.
+function spreadLabels(ys, gap, min, max) {
+  const order = ys.map((y, i) => i).sort((a, b) => ys[a] - ys[b] || a - b);
+  const out = ys.slice();
+  order.forEach((i, k) => { out[i] = k ? Math.max(ys[i], out[order[k - 1]] + gap) : Math.max(ys[i], min); });
+  for (let k = order.length - 1; k >= 0; k--) {
+    const limit = k === order.length - 1 ? max : out[order[k + 1]] - gap;
+    out[order[k]] = Math.min(out[order[k]], limit);
+  }
+  return out;
+}
+
 // Aperçu de l'image décodée : son heure est celle de la dernière image nouvelle reçue par le service. Ancienne
 // (IRD figé, injoignable, ou direct coupé), la carte la grise ; la page compose « préfixe + heure ».
 const THUMB_STALE_MS = 10_000;
@@ -224,5 +270,5 @@ function repeatDue(r, now, prefs) {
 
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView, alignSeries, spreadLabels };
 }

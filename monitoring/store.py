@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS events (
     kind TEXT, severity TEXT, detail TEXT, source TEXT);
 CREATE INDEX IF NOT EXISTS events_ts_start ON events(ts_start);
 CREATE INDEX IF NOT EXISTS events_ts_end ON events(ts_end);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value INTEGER);
 """
 
 # Colonnes numériques exposées par series() ; liste blanche contre l'injection SQL.
@@ -205,8 +206,19 @@ class Store:
             if deleted < PURGE_BATCH:
                 return
 
+    def last_event_start(self, kind: str) -> int | None:
+        return self._all("SELECT MAX(ts_start) FROM events WHERE kind = ?", (kind,))[0][0]
+
+    def set_alive(self, ts: int) -> None:
+        """Le service tournait encore à ts (marque régulière) : même sans aucune mesure, une coupure d'appareil
+        en cours à l'arrêt brutal du service dure au moins jusque-là."""
+        self._exec("INSERT INTO meta (key, value) VALUES ('alive', ?) "
+                   "ON CONFLICT(key) DO UPDATE SET value = MAX(value, excluded.value)", (ts,))
+
     def last_ts(self) -> int | None:
-        return self._all("SELECT MAX(m) FROM (SELECT MAX(ts) m FROM fsh_marker UNION ALL SELECT MAX(ts) FROM ird_sat)")[0][0]
+        """Dernière heure où le service a vu quelque chose : mesure ou marque de vie."""
+        return self._all("SELECT MAX(m) FROM (SELECT MAX(ts) m FROM fsh_marker UNION ALL SELECT MAX(ts) FROM ird_sat "
+                         "UNION ALL SELECT value FROM meta WHERE key = 'alive')")[0][0]
 
     def marker_series(self, from_ts: int, to_ts: int, max_points: int) -> dict:
         """Une série par marqueur FSH4 présent dans la plage : {numéro: série}."""

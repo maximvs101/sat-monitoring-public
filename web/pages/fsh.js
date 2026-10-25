@@ -38,8 +38,12 @@ const FshPage = (() => {
     dom.state.textContent = label;
     dom.meta.textContent = meta;
     dom.toggle.textContent = s.states.fsh === "paused" ? "Reprendre" : "Pause";
-    dom.down.hidden = !reason || !live();
-    dom.down.textContent = `Aucune mesure du FSH4 : ${reason}. Les mesures reprendront dès qu'il répondra à ses requêtes.`;
+    dom.toggle.hidden = s.states.fsh === "absent";
+    const absent = s.states.fsh === "absent";
+    dom.down.hidden = !(absent || (reason && live()));
+    dom.down.textContent = absent ? "Pas de FSH4 sur ce site (adresse vide dans Réglages › Appareils) : seules les périodes passées peuvent "
+      + "montrer des mesures d'un FSH4 précédent."
+      : `Aucune mesure du FSH4 : ${reason}. Les mesures reprendront dès qu'il répondra à ses requêtes.`;
   }
 
   // Porteuse à laquelle chaque marqueur est rattaché sur la période ; « plancher de bruit » sinon.

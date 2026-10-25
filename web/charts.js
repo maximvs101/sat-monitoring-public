@@ -74,22 +74,15 @@ const Charts = (() => {
     return !spans || spans.some(([from, to]) => t >= from && t <= to);
   }
 
-  // Mesures de plusieurs IRD alignées sur un même axe de temps : [ts, { champ: [une colonne par IRD] }].
+  // Mesures de plusieurs IRD alignées sur un même axe de temps : [ts, { champ: [une colonne par IRD] }], coupées
+  // sur les trous de mesure (alignSeries). Seuls les points où l'IRD était sur la porteuse comptent.
   function joinIrds(irds, carrier, fields) {
-    const serials = carrier.irds;
-    const ts = [...new Set(serials.flatMap((s) => (irds[s]?.ts || []).filter((t) => inPeriods(carrier, s, t))))]
-      .sort((a, b) => a - b);
-    const index = new Map(ts.map((t, i) => [t, i]));
-    const cols = Object.fromEntries(fields.map((f) => [f, serials.map(() => new Array(ts.length).fill(null))]));
-    serials.forEach((s, k) => {
-      const d = irds[s];
-      if (!d) return;
-      d.ts.forEach((t, i) => {
-        if (!index.has(t) || !inPeriods(carrier, s, t)) return;
-        for (const f of fields) cols[f][k][index.get(t)] = d[f][i];
-      });
-    });
-    return [ts, cols];
+    return alignSeries(carrier.irds.map((s) => {
+      const d = irds[s] || { ts: [] };
+      const keep = d.ts.map((t) => inPeriods(carrier, s, t));
+      const values = Object.fromEntries(fields.map((f) => [f, (d[f] || []).filter((_, i) => keep[i])]));
+      return { ts: d.ts.filter((_, i) => keep[i]), values };
+    }), fields);
   }
 
   // Seuils de marge : minimum fixe (rouge, toujours) et, en Direct, seuil de chute rapide de chaque IRD (orange).
@@ -100,19 +93,14 @@ const Charts = (() => {
       const { left, top, width, height } = u.bbox;
       const ctx = u.ctx;
       ctx.save();
-      ctx.lineWidth = 1.5;
-      ctx.font = "11px -apple-system, sans-serif";
+      const r = uPlot.pxRatio;  // le canevas est en pixels physiques : texte et écarts à l'échelle de l'écran
+      ctx.lineWidth = 1.5 * r;
+      ctx.font = `${11 * r}px -apple-system, sans-serif`;
       ctx.textAlign = "right";
+      const lines = [];
       const line = (level, color, dash, label) => {
         const y = u.valToPos(level, "y", true);
-        if (y < top || y > top + height) return;
-        ctx.strokeStyle = ctx.fillStyle = color;
-        ctx.setLineDash(dash);
-        ctx.beginPath();
-        ctx.moveTo(left, y);
-        ctx.lineTo(left + width, y);
-        ctx.stroke();
-        ctx.fillText(label, left + width - 4, y - 4);
+        if (y >= top && y <= top + height) lines.push({ y, color, dash, label });
       };
       if (cfg.margin_min_db > 0) line(cfg.margin_min_db, "#dc2626", [], `minimum ${fmt(cfg.margin_min_db, 1, "dB")}`);
       if (live) {
@@ -123,6 +111,24 @@ const Charts = (() => {
           line(level, "#d97706", [6, 4], `${who}alerte si chute sous ${fmt(level, 1, "dB")}`);
         }
       }
+      for (const l of lines) {
+        ctx.strokeStyle = l.color;
+        ctx.setLineDash(l.dash.map((v) => v * r));
+        ctx.beginPath();
+        ctx.moveTo(left, l.y);
+        ctx.lineTo(left + width, l.y);
+        ctx.stroke();
+      }
+      // Libellés au-dessus de leur ligne, écartés quand des seuils proches (deux IRD, chute et minimum) se recouvrent.
+      const ys = spreadLabels(lines.map((l) => l.y - 4 * r), 13 * r, top + 11 * r, top + height);
+      ctx.lineWidth = 3 * r;
+      ctx.strokeStyle = "#ffffff";  // liseré : lisible même quand une courbe passe derrière
+      ctx.setLineDash([]);
+      lines.forEach((l, i) => {
+        ctx.strokeText(l.label, left + width - 4 * r, ys[i]);
+        ctx.fillStyle = l.color;
+        ctx.fillText(l.label, left + width - 4 * r, ys[i]);
+      });
       ctx.restore();
     };
   }
@@ -176,7 +182,7 @@ const Charts = (() => {
   // Séries d'IRD (une couleur par IRD de la porteuse).
   function irdSeries(carrier, names, valueFmt) {
     return carrier.irds.map((s, k) => ({
-      label: names[s] || s, stroke: IRD_COLORS[k % IRD_COLORS.length], width: 1.6, spanGaps: true, value: valueFmt,
+      label: names[s] || s, stroke: IRD_COLORS[k % IRD_COLORS.length], width: 1.6, value: valueFmt,
     }));
   }
 
@@ -242,11 +248,14 @@ const Charts = (() => {
   // Marqueurs FSH4 (une couleur par numéro), en dBm sur 10 dB au moins. setData(fsh) avec fsh = { ts, levels }.
   function markerChart(zone, nums, freqs, { onSelect, height, label = (n) => markerLabel(n, freqs) } = {}) {
     const series = nums.map((n) => ({ label: label(n), stroke: MARKER_COLORS[(n - 1) % 6], width: 1.6,
-      spanGaps: true, value: (u, v) => fmt(v, 1, "dBm") }));
+      value: (u, v) => fmt(v, 1, "dBm") }));
     const chart = wrap(new uPlot(opts(zone.clientWidth || 600, series, { height, onSelect, yAxis: { label: "dBm" },
       scales: { y: { range: minSpanRange(10) } } }), empty(nums.length), zone));
     const setData = chart.setData;
-    chart.setData = (fsh) => setData([fsh.ts.map((t) => t / 1000), ...nums.map((n) => fsh.levels[n] || [])]);
+    chart.setData = (fsh) => {
+      const [ts, cols] = alignSeries(nums.map((n) => ({ ts: fsh.ts, values: { level: fsh.levels[n] || [] } })), ["level"]);
+      setData([ts.map((t) => t / 1000), ...cols.level]);
+    };
     return chart;
   }
 

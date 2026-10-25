@@ -211,3 +211,35 @@ test("aperçu de l'image décodée : récent, ancien, absent", () => {
   assert.deepEqual(core.thumbView(NOW - 11_000, NOW, true), { state: "old", prefix: "image de " });
   assert.equal(core.thumbView(NOW - 3000, NOW, false).state, "old");  // direct coupé : plus rien ne dit qu'elle est à jour
 });
+
+test("séries alignées : la ligne continue entre les points des autres sources", () => {
+  const [ts, cols] = core.alignSeries([
+    { ts: [0, 2000, 4000], values: { m: [1, 2, 3] } },
+    { ts: [1000, 3000], values: { m: [10, 20] } },
+  ], ["m"]);
+  assert.deepEqual(ts, [0, 1000, 2000, 3000, 4000]);
+  assert.deepEqual(cols.m[0], [1, undefined, 2, undefined, 3]);
+  assert.deepEqual(cols.m[1], [undefined, 10, undefined, 20, undefined]);
+});
+
+test("séries alignées : la ligne s'interrompt sur un trou de mesure", () => {
+  const ts1 = [0, 1000, 2000, 3_600_000, 3_601_000];  // service arrêté une heure
+  const [ts, cols] = core.alignSeries([{ ts: ts1, values: { m: [1, 2, 3, 4, 5] } }], ["m"]);
+  assert.deepEqual(ts, [0, 1000, 2000, 2001, 3_600_000, 3_601_000]);
+  assert.deepEqual(cols.m[0], [1, 2, 3, null, 4, 5]);
+});
+
+test("séries alignées : points regroupés, un intervalle manquant n'est pas un trou", () => {
+  const step = 60_000;
+  const ts1 = [0, step, 3 * step, 4 * step, 20 * step];  // un intervalle sans mesure, puis un vrai trou
+  const [ts, cols] = core.alignSeries([{ ts: ts1, values: { m: [1, 2, 3, 4, 5] } }], ["m"]);
+  assert.deepEqual(cols.m[0], [1, 2, 3, 4, null, 5]);
+  assert.equal(ts[4], 4 * step + 1);
+});
+
+test("étiquettes de seuils écartées quand elles se chevauchent, dans l'ordre et dans la zone", () => {
+  assert.deepEqual(core.spreadLabels([50, 20], 12, 0, 100), [50, 20]);          // assez loin : inchangées
+  assert.deepEqual(core.spreadLabels([40, 44], 12, 0, 100), [40, 52]);          // la plus basse descend
+  assert.deepEqual(core.spreadLabels([95, 98], 12, 0, 100), [88, 100]);         // en bas de zone : remontent
+  assert.deepEqual(core.spreadLabels([44, 40, 42], 12, 0, 100), [64, 40, 52]);  // ordre vertical conservé
+});

@@ -59,15 +59,17 @@ const SettingsPage = (() => {
     if (!dom.fshDirty || !dom.fshForm) dom.fshForm = fshForm(fsh, err);
     const paused = Store.state.states.fsh === "paused";
     const pause = button(paused ? "Reprendre" : "Pause", () => toggleFshPause((m) => showError(err, m)), { small: true });
+    pause.hidden = Store.state.states.fsh === "absent";
     const [label, tone] = DEVICE_STATE[Store.state.states.fsh] || DEVICE_STATE.unknown;
     const seen = Store.state.seen.fsh ? ` · dernière mesure ${fmtDateTime(Store.state.seen.fsh)}` : "";
     return cardBox(el("div", { className: "card-title" }, el("span", {}, "FSH4 ", el("span", { className: `badge ${tone}`, textContent: label }),
       el("small", { className: "muted", textContent: seen })), pause),
-      el("p", { className: "muted note", textContent: "Le service lit les réglages du FSH4 sans jamais les modifier." }), dom.fshForm, err);
+      el("p", { className: "muted note", textContent: "Le service lit les réglages du FSH4 sans jamais les modifier. "
+        + "Pas de FSH4 sur ce site : laisser l'adresse vide." }), dom.fshForm, err);
   }
 
   function fshForm(fsh, err) {
-    const host = el("input", { className: "input", value: fsh.host, required: true, spellcheck: false });
+    const host = el("input", { className: "input", value: fsh.host, spellcheck: false, placeholder: "aucun FSH4" });
     const port = el("input", { className: "input", type: "number", min: 1, max: 65535, value: fsh.port, required: true });
     const pol = select([["", "inconnue"], ...POL_OPTIONS], fsh.polarization);
     const form = el("form", { className: "form-row" }, field("Adresse", host), field("Port", port), field("Entrée (polarisation)", pol),

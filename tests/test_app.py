@@ -9,6 +9,7 @@ from pathlib import Path
 from monitoring.app import App
 from monitoring.config import CarrierEntry, IrdEntry, PathsConfig, load_config, save_irds
 from monitoring.fsh import FshReading, FshSettings, MarkerSample
+from monitoring.store import Store
 from monitoring.ird import IrdError, IrdHealth, IrdLogMessage, IrdReading, IrdSample
 
 V = "vertical"
@@ -60,6 +61,7 @@ class AppTest(unittest.TestCase):
         self.cfg_path.write_text("[fsh]\nhost = \"10.0.0.9\" # FSH4\n", encoding="utf-8")
         self.irds = FakeIrds()
         self.reading = fsh({1: (11_220.8e6, -50.0), 4: (11_200e6, -67.0)})
+        self.fsh_read = lambda: self.reading
         self.closed = 0
 
     def make(self, entries=(), carriers=(), fsh_pol=V, noise_markers=()):
@@ -68,7 +70,7 @@ class AppTest(unittest.TestCase):
         cfg = replace(cfg, fsh=replace(cfg.fsh, polarization=fsh_pol), carriers=tuple(carriers),
                       detect=replace(cfg.detect, noise_markers=noise_markers),
                       paths=PathsConfig(db=str(Path(self.dir.name) / "m.db"), log_dir=self.dir.name))
-        app = App(cfg, fsh_read=lambda: self.reading, fsh_close=self.count_close, ird_factory=self.irds.factory,
+        app = App(cfg, fsh_read=lambda: self.fsh_read(), fsh_close=self.count_close, ird_factory=self.irds.factory,
                   config_path=self.cfg_path, web_dir=Path(self.dir.name))
         self.addCleanup(app.stop)
         return app
@@ -132,6 +134,21 @@ class AppTest(unittest.TestCase):
         app._on_ird("S1", 1_000, IrdReading(sample(), thumb=b"\xff\xd8tard"))
         self.assertIsNone(app.thumbnail("S1"))
         self.assertNotIn("S1", app.thumbs)
+
+    def test_clean_stop_closes_open_events_at_stop_time(self):
+        # Arrêt propre avec un appareil injoignable depuis 8 min : l'alerte dure jusqu'à l'arrêt, pas 0 s.
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        now = int(time.time() * 1000)
+        app.store.open_event(now - 480_000, "device_down", "critical", "IRD 1 — injoignable", "ird:S1")
+        app.stop()
+        ev = Store(app.cfg.paths.db).events(0, now + 60_000)[0]
+        self.assertGreaterEqual(ev["ts_end"], now)
+
+    def test_alive_mark_written(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        before = int(time.time() * 1000)
+        app.mark_alive()
+        self.assertGreaterEqual(app.store.last_ts(), before)
 
     def test_status_has_thumb_ts(self):
         app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
@@ -455,6 +472,40 @@ class AppTest(unittest.TestCase):
         self.assertEqual(load_config(self.cfg_path).irds[0].polarization, "horizontal")
         app.update_ird("S1", name=None, host=None, polarization=None)
         self.assertIsNone(load_config(self.cfg_path).irds[0].polarization)
+
+    def test_no_fsh_in_config(self):
+        # Site sans FSH4 : aucune lecture, aucun « injoignable », état « absent ».
+        self.cfg_path.write_text('[fsh]\nhost = ""\n', encoding="utf-8")
+        reads = []
+        self.fsh_read = lambda: reads.append(1)
+        app = self.make()
+        app.fsh_loop.step()
+        app.fsh_loop.step()
+        self.assertEqual(reads, [])
+        self.assertEqual(app.status()["fsh"]["state"], "absent")
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["kind"] == "device_down"], [])
+
+    def test_fsh_removed_then_added_back(self):
+        app = self.make()
+        app.fsh_loop.state = "down"
+        app.store.add_status(1000, "fsh", "down", "FSH4 injoignable")
+        app._on_state(1000, "fsh", "down", "FSH4 injoignable")
+        app.set_fsh("", 5555, None)
+        app.fsh_loop.step()
+        self.assertEqual(app.fsh_loop.state, "absent")
+        self.assertTrue(all(e["ts_end"] is not None for e in app.store.events(0, 10**13)))
+        app.set_fsh("10.0.0.8", 5555, None)
+        self.assertFalse(app.fsh_loop._paused.is_set())  # lu de nouveau à la prochaine itération
+
+    def test_status_drops_measurements_of_previous_fsh(self):
+        # Nouveau FSH4 (ou retiré) : la « dernière mesure » affichée n'est pas celle de l'ancien appareil.
+        app = self.make()
+        app.store.add_markers(1000, {1: MarkerSample(11_220.8e6, -50.0)})
+        self.assertEqual(app.status()["marker"]["ts"], 1000)
+        app.set_fsh("", 5555, None)
+        st = app.status()
+        self.assertIsNone(st["marker"])
+        self.assertEqual(st["markers"], {})
 
     def test_pause_closes_fsh(self):
         app = self.make()

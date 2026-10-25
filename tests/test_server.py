@@ -130,6 +130,17 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(s["fsh"]["1"]["level_dbm"], [-50.0, -50.0])
         self.assertEqual(s["carriers"][0]["markers"], [1])
 
+    def test_series_carrier_irds_in_config_order(self):
+        # Même ordre qu'en Direct (celui des IRD suivis), pas l'ordre des numéros de série.
+        self.app.add_ird("10.0.0.2")          # suivis : S1, S2
+        self.app.remove_ird("S1")
+        self.app.add_ird("10.0.0.1")          # suivis : S2, S1
+        for ts in (5000, 6000):
+            for serial in ("S1", "S2"):
+                self.app.store.add_ird(ts, serial, sample())
+        s = self.get_json("/api/series?from=0&to=10000")
+        self.assertEqual(s["carriers"][0]["irds"], ["S2", "S1"])
+
     def test_series_splits_retuned_ird(self):
         for ts in (1000, 2000):
             self.app.store.add_ird(ts, "S1", sample(rf_khz=11_220_806))
@@ -233,9 +244,18 @@ class ServerTest(unittest.TestCase):
         for body in ({"host": 'x" ; rm', "port": 5555, "polarization": None},
                      {"host": "10.0.0.8", "port": 70000, "polarization": None},
                      {"host": "10.0.0.8", "port": 5555, "polarization": "oblique"},
-                     {"host": "", "port": 5555}):
+                     {"host": None, "port": 5555}):
             self.assertEqual(self.post("/api/fsh", body)[0], 400, body)
         self.assertEqual(load_config(self.cfg_path).fsh.host, "192.168.10.224")
+
+    def test_no_fsh(self):
+        # Adresse vide : pas de FSH4 sur ce site. Ni pause ni reprise n'ont alors de sens.
+        self.assertEqual(self.post("/api/fsh", {"host": "", "port": 5555})[0], 204)
+        self.assertEqual(load_config(self.cfg_path).fsh.host, "")
+        self.app.fsh_loop.step()
+        self.assertEqual(self.get_json("/api/status")["fsh"]["state"], "absent")
+        self.assertEqual(self.post("/api/fsh/resume")[0], 400)
+        self.assertEqual(self.post("/api/fsh/pause")[0], 400)
 
     def test_json_required(self):
         status, _ = self.request("POST", "/api/fsh", headers={"Content-Type": "text/plain"},
@@ -403,6 +423,8 @@ class StartupTest(unittest.TestCase):
         self.assertIn("IRD (10.0.0.2)", msg)
         self.assertIn("http://127.0.0.1:8080", msg)
         self.assertIn("aucun IRD", startup_message(Config(), 8080))
+        no_fsh = replace(Config(), fsh=replace(Config().fsh, host=""))
+        self.assertIn("FSH4 aucun", startup_message(no_fsh, 8080))
 
 
 class PortBusyTest(unittest.TestCase):

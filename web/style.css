@@ -146,9 +146,15 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .form-row { display: flex; gap: var(--sp-3); align-items: flex-end; flex-wrap: wrap; }
 
 /* --- Carte d'IRD ; --s = échelle choisie par la grille (card.js), --card-h = hauteur --- */
-.ird-grid { --s: 1; --card-h: 290px; display: grid; gap: 12px; align-content: start; }
+.ird-grid { --s: 1; --card-h: 300px; display: grid; gap: 12px; align-content: start; }
+/* Grille : les valeurs ont toute la largeur, l'aperçu de l'image est à droite de la courbe de marge (en compacte, où
+   la courbe n'est qu'une bande, à droite des valeurs). Seule la rangée de la courbe cède de la place. */
 .ird-card {
-  display: flex; flex-direction: column; gap: calc(4px * var(--s));
+  --thumb-w: calc(112px * var(--s));  /* colonne de l'aperçu : largeur fixe, sinon la grille l'élargit aux dépens des valeurs */
+  display: grid; grid-template-columns: minmax(0, 1fr) var(--thumb-w);
+  grid-template-rows: auto auto auto auto minmax(calc(56px * var(--s)), 1fr);
+  grid-template-areas: "head head" "why why" "sub sub" "values values" "chart thumb";
+  gap: 0 calc(10px * var(--s));
   height: var(--card-h); min-height: 0; overflow: hidden;
   padding: calc(8px * var(--s)) calc(12px * var(--s));
   background: var(--surface); border: 1px solid var(--border);
@@ -156,27 +162,32 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
   font-size: calc(13px * var(--s));
 }
 .ird-card.free { height: auto; }  /* hors grille (page de porteuse) : hauteur naturelle */
-.ird-card > * { flex: none; }     /* seule la courbe cède de la place : le texte ne s'écrase jamais */
+.ird-card > header { grid-area: head; } .ird-card > .ird-why { grid-area: why; } .ird-card > .ird-sub { grid-area: sub; }
+.ird-card > .ird-values { grid-area: values; } .ird-card > .ird-thumb { grid-area: thumb; } .ird-card > .ird-chart { grid-area: chart; }
+/* Espacement porté par chaque élément (pas d'écart de grille) : une rangée vide, comme une cause absente, n'en ajoute pas. */
+.ird-card > * + * { margin-top: calc(4px * var(--s)); }
+.ird-thumb[hidden] + .ird-chart { grid-column: 1 / -1; }  /* résumé de période : la courbe reprend la place de l'aperçu */
 .ird-card.link { cursor: pointer; }
 .ird-card.link:hover, .ird-card.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ird-card header { display: flex; align-items: center; gap: calc(8px * var(--s)); }
 .ird-card .dot { width: calc(9px * var(--s)); height: calc(9px * var(--s)); }
 .ird-name { font-size: calc(16px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ird-card .badge { margin-left: auto; font-size: calc(11px * var(--s)); padding: calc(1px * var(--s)) calc(8px * var(--s)); }
-.ird-why { margin: 0; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Cause en clair : deux lignes au plus, jamais coupée au milieu d'une information courte. */
+.ird-why { margin-bottom: 0; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .ird-why:empty { display: none; }
-.ird-sub { margin: 0; color: var(--muted); font-size: calc(12px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ird-values { margin: calc(2px * var(--s)) 0 0; display: grid; gap: calc(1px * var(--s)) 0; }
-.ird-values div { display: flex; align-items: baseline; gap: calc(8px * var(--s)); border-bottom: 1px dotted var(--border); }
+.ird-sub { margin-bottom: 0; color: var(--muted); font-size: calc(12px * var(--s)); overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.ird-values { margin-bottom: 0; display: grid; gap: calc(1px * var(--s)) 0; }
+.ird-values div { display: flex; align-items: baseline; gap: calc(8px * var(--s)); min-width: 0; border-bottom: 1px dotted var(--border); }
 .ird-values dt { color: var(--muted); flex: none; width: calc(96px * var(--s)); }
-.ird-values dd { margin: 0; font-weight: 600; font-size: calc(15px * var(--s)); font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ird-values dd small { margin-left: calc(6px * var(--s)); font-weight: 400; font-size: calc(11px * var(--s)); color: var(--muted); }
+/* La valeur ne se coupe jamais ; son indication passe à la ligne s'il le faut plutôt que d'être tronquée
+   (à côté de l'aperçu, la colonne des valeurs est étroite). */
+.ird-values dd { margin: 0; min-width: 0; font-weight: 600; font-size: calc(15px * var(--s)); font-variant-numeric: tabular-nums; }
+.ird-values dd .v { white-space: nowrap; margin-right: calc(6px * var(--s)); }
+.ird-values dd small { display: inline-block; max-width: 100%; font-weight: 400; font-size: calc(11px * var(--s)); color: var(--muted); }
 .ird-values dd.bad { color: var(--bad-text); } .ird-values dd.violet { color: var(--violet-text); } .ird-values dd.warn { color: var(--warn-text); }
-/* Valeurs et aperçu côte à côte ; carte trop étroite (page de porteuse à trois IRD) : l'aperçu passe dessous. */
-.ird-top { display: flex; flex-wrap: wrap; align-items: flex-start; gap: calc(4px * var(--s)) calc(10px * var(--s)); }
-.ird-top > .ird-values { flex: 1 1 calc(160px * var(--s)); min-width: 0; }
-.ird-thumb { flex: none; width: calc(100px * var(--s)); margin: calc(2px * var(--s)) 0 0; cursor: zoom-in; }
+.ird-thumb { width: var(--thumb-w); margin-inline: 0; margin-bottom: 0; align-self: start; min-height: 0; cursor: zoom-in; }
 .ird-thumb[hidden] { display: none; }
 .ird-thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm);
   background: var(--bg); border: 1px solid var(--border); box-sizing: border-box; }
@@ -187,14 +198,14 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .ird-thumb.none img { display: none; }
 .ird-thumb.none::before { content: ""; display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px dashed var(--border);
   border-radius: var(--radius-sm); box-sizing: border-box; }
-.ird-grid.compact .ird-thumb { width: calc(80px * var(--s)); }
+.ird-grid.compact .ird-card { --thumb-w: calc(80px * var(--s)); }
 .thumb-viewer { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
   color: var(--text); cursor: zoom-out; }
 .thumb-viewer::backdrop { background: rgb(0 0 0 / .5); }
 .thumb-viewer img { display: block; width: 320px; height: 180px; }
 .thumb-viewer img.old { filter: grayscale(1); opacity: .55; }
 .thumb-viewer p { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
-.ird-card > .ird-chart { flex: 1 1 auto; min-height: calc(56px * var(--s)); display: flex; flex-direction: column; }
+.ird-card > .ird-chart { min-height: 0; display: flex; flex-direction: column; }
 .ird-chart-title { margin: 0; color: var(--muted); font-size: calc(11px * var(--s)); }
 .ird-spark { width: 100%; flex: 1; min-height: 0; }
 .ird-band { width: 100%; height: calc(8px * var(--s)); flex: none; }
@@ -207,12 +218,16 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .ird-card[data-tone="warn"] .ird-why { color: var(--warn-text); }
 .ird-card[data-tone="violet"] .ird-why { color: var(--violet-text); }
 .ird-card[data-tone="bad"] .ird-why { color: var(--bad-text); }
-/* Compacte : sans les précisions secondaires, valeurs sur deux colonnes, courbe plus basse. */
+/* Compacte : sans les précisions secondaires, cause et programme sur une ligne (en entier au survol de la carte),
+   valeurs sur une colonne à côté de l'aperçu, courbe plus basse. Hauteurs de référence : FULL et COMPACT de card.js. */
 .ird-grid.compact .ird-values dd small, .ird-grid.compact .ird-chart-title, .ird-grid.compact .ird-axis { display: none; }
-.ird-grid.compact .ird-card > .ird-chart { min-height: calc(20px * var(--s)); }
-.ird-grid.compact .ird-values { grid-template-columns: 1fr 1fr; column-gap: calc(10px * var(--s)); }
-.ird-grid.compact .ird-values dt { width: auto; }
-.ird-grid.compact .ird-values dd { font-size: calc(14px * var(--s)); }
+.ird-grid.compact .ird-card { grid-template-rows: auto auto auto auto minmax(calc(20px * var(--s)), 1fr);
+  grid-template-areas: "head head" "why why" "sub sub" "values thumb" "chart chart"; }
+.ird-grid.compact .ird-values dt { width: calc(48px * var(--s)); }
+.ird-grid.compact .ird-why { -webkit-line-clamp: 1; }
+/* Tuiles de la vue d'ensemble (hauteur fixe) : programme et porteuse sur une ligne ; deux lignes sur la page de porteuse. */
+.ird-grid .ird-sub { -webkit-line-clamp: 1; }
+.ird-grid.compact .ird-values dd { font-size: calc(14px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* --- Vue d'ensemble --- */
 .overview-main { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--sp-4); align-items: start; }
@@ -246,6 +261,15 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .ird-sections { --s: 1; --card-h: auto; display: grid; gap: var(--sp-3); align-items: start; }
 .ird-section { display: flex; flex-direction: column; gap: var(--sp-2); border-radius: var(--radius); }
 .ird-section .ird-card { border-left: 4px solid var(--ird-color, var(--border)); }
+/* Carte étroite (trois IRD sur la porteuse, petite fenêtre) : l'aperçu passe sous la courbe plutôt que de l'écraser. */
+.ird-section { container-type: inline-size; }
+@container (max-width: 360px) {
+  .ird-section .ird-card { grid-template-areas: "head head" "why why" "sub sub" "values values" "chart chart" "thumb thumb";
+    grid-template-rows: auto; }
+  /* Détails : libellé au-dessus de sa valeur, la valeur garde toute la largeur. */
+  .ird-section .ird-details { grid-template-columns: minmax(0, 1fr); }
+  .ird-section .ird-details dd + dt { margin-top: var(--sp-1); }
+}
 .ird-section .ird-spark { height: 70px; flex: none; }
 .ird-section.target .ird-card { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ird-details { margin: 0; padding: var(--sp-2) var(--sp-3); background: var(--surface); border: 1px solid var(--border);

@@ -21,6 +21,7 @@ log = logging.getLogger("monitoring")
 QUEUE_SIZE = 1000
 UNCHANGED = object()  # « paramètre non fourni », distinct de None (= polarisation automatique)
 PURGE_EVERY_S = 3600
+ALIVE_EVERY_S = 30  # marque de vie : après un arrêt brutal, les alertes en cours sont fermées à cette heure au plus tôt
 
 
 class LiveBus:
@@ -115,6 +116,7 @@ class App:
         self._stopping = threading.Event()
         self._purger = threading.Thread(target=self._purge_loop, name="purge", daemon=True)
         self._identifier = threading.Thread(target=self._identify_loop, name="identification", daemon=True)
+        self._alive = threading.Thread(target=self._alive_loop, name="marque-de-vie", daemon=True)
 
         if fsh_read is None:
             fsh_read, fsh_close = default_fsh(cfg)
@@ -123,6 +125,8 @@ class App:
                                    lambda ts, st, detail: self._on_state(ts, "fsh", st, detail),
                                    d.down_after_failures, d.retry_s, close=fsh_close,
                                    min_idle_s=cfg.fsh.min_idle_s)
+        if not cfg.fsh.host:
+            self.fsh_loop.pause("absent")  # site sans FSH4 : jamais lu, jamais « injoignable »
         self._fsh_key = None
         self.marker_freqs = {}
         self.marker_map = attach_markers([], {}, cfg.fsh.polarization)
@@ -336,19 +340,33 @@ class App:
         log.info("Seuils de marge : chute %.1f dB, minimum %.1f dB", margin_drop_db, margin_min_db)
         self._publish_events(events)
 
+    @property
+    def fsh_absent(self) -> bool:
+        """Pas de FSH4 sur ce site (adresse vide) : ni lecture, ni pause, ni alerte."""
+        return not self.cfg.fsh.host
+
     def set_fsh(self, host: str, port: int, polarization: str | None) -> None:
+        """Adresse vide : pas de FSH4."""
         with self._devices_lock:
             if self.config_path is not None:
                 save_fsh(self.config_path, host, port, polarization)
+            was_absent = self.fsh_absent
             self.cfg = replace(self.cfg, fsh=replace(self.cfg.fsh, host=host, port=port, polarization=polarization))
             fsh_read, fsh_close = default_fsh(self.cfg)
             with self._detect_lock:
                 # Le changement est d'abord demandé : une lecture de l'ancien appareil qui se termine ensuite est
                 # reconnue (replacement_pending) et ignorée par la détection.
                 self.fsh_loop.replace_reader(fsh_read, fsh_close)
-                events = self.detector.on_devices_changed(_now_ms(), f"FSH4 {host}:{port}")
+                if not host:
+                    self.fsh_loop.pause("absent")
+                elif was_absent:
+                    self.fsh_loop.resume()
+                events = self.detector.on_devices_changed(_now_ms(), f"FSH4 {host}:{port}" if host else "FSH4 retiré")
                 self._fsh_key = None
-        log.info("FSH4 : %s:%d, entrée %s", host, port, polarization or "polarisation inconnue")
+        if host:
+            log.info("FSH4 : %s:%d, entrée %s", host, port, polarization or "polarisation inconnue")
+        else:
+            log.info("FSH4 retiré : pas de FSH4 sur ce site")
         self._publish_events(events)
 
     # --- Mesures ---
@@ -477,6 +495,10 @@ class App:
     def status(self) -> dict:
         srv, det = self.cfg.server, self.cfg.detect
         latest = self.store.latest()
+        # Mesures d'un FSH4 précédent (adresse changée ou FSH4 retiré) : pas la « dernière mesure » de l'actuel.
+        changed = self.store.last_event_start("devices_changed")
+        if changed is not None and latest["marker"] is not None and latest["marker"]["ts"] < changed:
+            latest = {**latest, "marker": None, "markers": {}}
         carriers = self.carriers_view()
         mm = self.marker_map
         loops, names, hosts = list(self.ird_loops.items()), dict(self.names), dict(self.hosts)
@@ -526,8 +548,21 @@ class App:
             if self._stopping.wait(PURGE_EVERY_S):
                 return
 
+    def mark_alive(self) -> None:
+        self.store.set_alive(_now_ms())
+
+    def _alive_loop(self):
+        while True:
+            try:
+                self.mark_alive()
+            except Exception:
+                log.exception("Échec de la marque de vie")
+            if self._stopping.wait(ALIVE_EVERY_S):
+                return
+
     def _close_open_events(self) -> int:
-        """Événements restés ouverts (arrêt du service) : fermés à la dernière mesure enregistrée."""
+        """Événements restés ouverts après un arrêt brutal (veille, coupure) : fermés à la dernière heure où le service
+        tournait (mesure ou marque de vie)."""
         last = self.store.last_ts()
         return 0 if last is None else self.store.close_open_events(last)
 
@@ -538,6 +573,7 @@ class App:
         if self.cfg.paths.retention_days > 0:
             self._purger.start()
         self._started = True
+        self._alive.start()
         self.fsh_loop.start()
         for loop in list(self.ird_loops.values()):
             loop.start()
@@ -546,6 +582,8 @@ class App:
             self._identifier.start()
 
     def stop(self) -> None:
+        if self._stopping.is_set():
+            return  # déjà arrêté : la base est fermée
         self._stopping.set()
         loops = [self.fsh_loop, *self.ird_loops.values()]
         for loop in loops:
@@ -555,5 +593,6 @@ class App:
                 loop.join(5)
         if self.fsh_loop.close is not None:
             self.fsh_loop.close()
-        self._close_open_events()
+        # Arrêt propre : un défaut en cours (appareil injoignable…) a duré jusqu'à maintenant.
+        self.store.close_open_events(_now_ms())
         self.store.close()
