@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.2** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.2, `MonitoringSat-Windows.zip`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.3** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.3, `MonitoringSat-Windows.zip`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
 
 ## À faire
 
@@ -23,6 +23,7 @@
 
 ## 25 octobre 2026
 
+- **Version v1.3.3** publiée (tuiles d'IRD épurées et adaptatives) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.3, notes en français.
 - **Tuiles d'IRD épurées et adaptatives** (branche `tuiles-ird`, design et plan du 25/10 dans docs/superpowers) : à la demande de Max, une tuile ne montre plus que l'état, la marge (chiffre + courbe 10 min) et l'image, disposition « chiffre d'abord » (maquette C) ; programme, signal reçu et température passent dans les détails de la page de la porteuse. Grille choisie par `tileGrid` (core.js, testée) : jusqu'à 9 IRD sans défilement, hauteur plafonnée à 420 px, à égalité le moins de rangées ; au-delà de 9, grille de 9 et défilement. Fin du facteur d'échelle `--s` et du mode compact : la tuile est un conteneur CSS et tout y est dimensionné en `cqw`/`cqh` avec `clamp()`. Choix : courbe sans graduations ni texte ; badge de résumé « DÉFAUTS ». Vérifié sur la démo en 1280 × 640, 1920 × 950 et 2560 × 1300 pour 1, 2, 3, 9 et 12 IRD (pire cas : cause, nom long, badge long) : rien ne déborde ; en 3 × 3 sur petit écran, chiffre 28 px, image 80 px, courbe 28 px.
 
 - **Version v1.3.2** publiée (cartes lisibles, courbes coupées sur les trous de mesure, fonctionnement sans FSH4) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.2, notes en français. Le tag v1.3.1 reste sans release : sa fabrication s'était arrêtée sur un test qui laissait une base ouverte (WinError 32 sous Windows), corrigé.
