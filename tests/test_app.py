@@ -141,7 +141,9 @@ class AppTest(unittest.TestCase):
         now = int(time.time() * 1000)
         app.store.open_event(now - 480_000, "device_down", "critical", "IRD 1 — injoignable", "ird:S1")
         app.stop()
-        ev = Store(app.cfg.paths.db).events(0, now + 60_000)[0]
+        store = Store(app.cfg.paths.db)
+        self.addCleanup(store.close)  # sous Windows, une base restée ouverte empêche d'effacer le dossier de test
+        ev = store.events(0, now + 60_000)[0]
         self.assertGreaterEqual(ev["ts_end"], now)
 
     def test_alive_mark_written(self):
