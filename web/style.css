@@ -145,71 +145,90 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 }
 .form-row { display: flex; gap: var(--sp-3); align-items: flex-end; flex-wrap: wrap; }
 
-/* --- Carte d'IRD ; --s = échelle choisie par la grille (card.js), --card-h = hauteur --- */
-.ird-grid { --s: 1; --card-h: 300px; display: grid; gap: 12px; align-content: start; }
-/* Grille : les valeurs ont toute la largeur, l'aperçu de l'image est à droite de la courbe de marge (en compacte, où
-   la courbe n'est qu'une bande, à droite des valeurs). Seule la rangée de la courbe cède de la place. */
+/* --- Tuile d'IRD (card.js), « chiffre d'abord » : nom et état, cause, marge en grand et image, courbe en bas.
+   La tuile est un conteneur : polices, image et courbe suivent SA taille (cqw, cqh), bornées par clamp() — lisibles en
+   3 × 3 sur un 1280 × 720, plafonnées avec peu d'IRD. --card-h : hauteur choisie par la grille (tileGrid, core.js). --- */
+.ird-grid { --card-h: 300px; display: grid; gap: 12px; align-content: start; }
 .ird-card {
-  --thumb-w: calc(112px * var(--s));  /* colonne de l'aperçu : largeur fixe, sinon la grille l'élargit aux dépens des valeurs */
-  display: grid; grid-template-columns: minmax(0, 1fr) var(--thumb-w);
-  grid-template-rows: auto auto auto auto minmax(calc(56px * var(--s)), 1fr);
-  grid-template-areas: "head head" "why why" "sub sub" "values values" "chart thumb";
-  gap: 0 calc(10px * var(--s));
-  height: var(--card-h); min-height: 0; overflow: hidden;
-  padding: calc(8px * var(--s)) calc(12px * var(--s));
+  container-type: size;
+  box-sizing: border-box; height: var(--card-h); min-height: 0; overflow: hidden;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto auto minmax(0, 1fr);
+  grid-template-areas: "head head" "why why" "sub sub" "num thumb" "chart chart";
+  column-gap: 12px; padding: 10px 14px 12px;
   background: var(--surface); border: 1px solid var(--border);
-  border-top: calc(4px * var(--s)) solid var(--ok); border-radius: var(--radius);
-  font-size: calc(13px * var(--s));
+  border-top: 4px solid var(--ok); border-radius: var(--radius);
+  font-size: 13px;
 }
-.ird-card.free { height: auto; }  /* hors grille (page de porteuse) : hauteur naturelle */
 .ird-card > header { grid-area: head; } .ird-card > .ird-why { grid-area: why; } .ird-card > .ird-sub { grid-area: sub; }
-.ird-card > .ird-values { grid-area: values; } .ird-card > .ird-thumb { grid-area: thumb; } .ird-card > .ird-chart { grid-area: chart; }
+.ird-card > .ird-num { grid-area: num; } .ird-card > .ird-thumb { grid-area: thumb; } .ird-card > .ird-chart { grid-area: chart; }
+.ird-card > .ird-durations { grid-area: thumb; }
 /* Espacement porté par chaque élément (pas d'écart de grille) : une rangée vide, comme une cause absente, n'en ajoute pas. */
-.ird-card > * + * { margin-top: calc(4px * var(--s)); }
-.ird-thumb[hidden] + .ird-chart { grid-column: 1 / -1; }  /* résumé de période : la courbe reprend la place de l'aperçu */
+.ird-card > * + * { margin-top: clamp(3px, 2.2cqh, 9px); }
 .ird-card.link { cursor: pointer; }
 .ird-card.link:hover, .ird-card.link:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-.ird-card header { display: flex; align-items: center; gap: calc(8px * var(--s)); }
-.ird-card .dot { width: calc(9px * var(--s)); height: calc(9px * var(--s)); }
-.ird-name { font-size: calc(16px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ird-card .badge { margin-left: auto; font-size: calc(11px * var(--s)); padding: calc(1px * var(--s)) calc(8px * var(--s)); }
-/* Cause en clair : deux lignes au plus, jamais coupée au milieu d'une information courte. */
-.ird-why { margin-bottom: 0; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+
+.ird-card header { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ird-name { min-width: min(4.5em, 50%); font-size: clamp(13px, min(5.5cqw, 9cqh), 22px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ird-card .badge { margin-left: auto; flex: none; white-space: nowrap; font-size: clamp(10px, min(3.6cqw, 6cqh), 13px);
+  padding: .15em .7em; }
+.ird-why { margin-bottom: 0; font-weight: 600; font-size: clamp(11px, min(4cqw, 7cqh), 14px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ird-why:empty { display: none; }
-.ird-sub { margin-bottom: 0; color: var(--muted); font-size: calc(12px * var(--s)); overflow: hidden;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.ird-values { margin-bottom: 0; display: grid; gap: calc(1px * var(--s)) 0; }
-.ird-values div { display: flex; align-items: baseline; gap: calc(8px * var(--s)); min-width: 0; border-bottom: 1px dotted var(--border); }
-.ird-values dt { color: var(--muted); flex: none; width: calc(96px * var(--s)); }
-/* La valeur ne se coupe jamais ; son indication passe à la ligne s'il le faut plutôt que d'être tronquée
-   (à côté de l'aperçu, la colonne des valeurs est étroite). */
-.ird-values dd { margin: 0; min-width: 0; font-weight: 600; font-size: calc(15px * var(--s)); font-variant-numeric: tabular-nums; }
-.ird-values dd .v { white-space: nowrap; margin-right: calc(6px * var(--s)); }
-.ird-values dd small { display: inline-block; max-width: 100%; font-weight: 400; font-size: calc(11px * var(--s)); color: var(--muted); }
-.ird-values dd.bad { color: var(--bad-text); } .ird-values dd.violet { color: var(--violet-text); } .ird-values dd.warn { color: var(--warn-text); }
-.ird-thumb { width: var(--thumb-w); margin-inline: 0; margin-bottom: 0; align-self: start; min-height: 0; cursor: zoom-in; }
+.ird-sub { margin-bottom: 0; color: var(--muted); font-size: clamp(11px, min(3.6cqw, 6cqh), 13px);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ird-sub[hidden] { display: none; }
+
+/* Marge : la plus grosse écriture de la tuile, à toute taille. */
+.ird-num { align-self: center; min-width: 0; margin-bottom: 0; }
+.ird-num-label { display: block; color: var(--muted); font-size: clamp(9px, min(3.2cqw, 5.5cqh), 12px);
+  text-transform: uppercase; letter-spacing: .06em; }
+.ird-num-line { display: block; white-space: nowrap; line-height: 1; font-weight: 700; font-variant-numeric: tabular-nums;
+  font-size: clamp(22px, min(14cqw, 24cqh), 64px); letter-spacing: -.01em; }
+.ird-num-unit { margin-left: .15em; font-size: .45em; font-weight: 500; color: var(--muted); letter-spacing: 0; }
+.ird-num.bad .ird-num-value { color: var(--bad-text); }
+
+/* Image décodée : vignette 16:9 ; ancienne, grisée avec son heure en surimpression ; aucune, cadre vide. */
+.ird-thumb { position: relative; align-self: center; width: clamp(80px, min(40cqw, 60cqh), 260px); margin-inline: 0;
+  margin-bottom: 0; cursor: zoom-in; }
 .ird-thumb[hidden] { display: none; }
 .ird-thumb img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm);
   background: var(--bg); border: 1px solid var(--border); box-sizing: border-box; }
-.ird-thumb figcaption { font-size: calc(10px * var(--s)); color: var(--muted); font-variant-numeric: tabular-nums;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ird-thumb figcaption { position: absolute; right: 4px; bottom: 4px; max-width: calc(100% - 8px); padding: 1px 5px;
+  border-radius: 3px; background: rgb(0 0 0 / .55); color: #fff; font-size: clamp(9px, min(3cqw, 5cqh), 11px);
+  font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ird-thumb figcaption:empty { display: none; }
 .ird-thumb.old img { filter: grayscale(1); opacity: .55; }
 .ird-thumb.none { cursor: default; }
 .ird-thumb.none img { display: none; }
 .ird-thumb.none::before { content: ""; display: block; width: 100%; aspect-ratio: 16 / 9; border: 1px dashed var(--border);
   border-radius: var(--radius-sm); box-sizing: border-box; }
-.ird-grid.compact .ird-card { --thumb-w: calc(80px * var(--s)); }
+.ird-thumb.none figcaption { inset: 0; right: auto; bottom: auto; display: flex; align-items: center; justify-content: center;
+  max-width: none; background: none; color: var(--muted); }
+
+/* Agrandissement de l'image (clic sur la vignette) : taille réelle de l'aperçu. */
 .thumb-viewer { padding: 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface);
   color: var(--text); cursor: zoom-out; }
 .thumb-viewer::backdrop { background: rgb(0 0 0 / .5); }
 .thumb-viewer img { display: block; width: 320px; height: 180px; }
 .thumb-viewer img.old { filter: grayscale(1); opacity: .55; }
 .thumb-viewer p { margin: 6px 0 0; font-size: 12px; color: var(--muted); }
-.ird-card > .ird-chart { min-height: 0; display: flex; flex-direction: column; }
-.ird-chart-title { margin: 0; color: var(--muted); font-size: calc(11px * var(--s)); }
-.ird-spark { width: 100%; flex: 1; min-height: 0; }
-.ird-band { width: 100%; height: calc(8px * var(--s)); flex: none; }
-.ird-axis { margin: 0; display: flex; justify-content: space-between; padding-left: calc(30px * var(--s)); color: var(--muted); font-size: calc(10px * var(--s)); }
+
+/* Courbe de marge (10 min) et trait d'état : toute la hauteur restante. */
+.ird-card > .ird-chart { min-height: 26px; display: flex; flex-direction: column; gap: 3px; }
+.ird-chart[hidden] { display: none; }
+.ird-spark { width: 100%; flex: 1; min-height: 20px; }
+.ird-band { width: 100%; height: clamp(3px, 1.6cqh, 6px); flex: none; border-radius: 2px; }
+
+/* Période passée : les trois durées à la place de l'image. */
+.ird-durations { margin-bottom: 0; align-self: center; display: grid; gap: 2px; font-size: clamp(11px, min(3.6cqw, 6cqh), 13px); }
+.ird-durations[hidden] { display: none; }
+.ird-durations div { display: flex; justify-content: space-between; gap: 10px; }
+.ird-durations dt { color: var(--muted); }
+.ird-durations dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ird-durations dd.bad { color: var(--bad-text); } .ird-durations dd.violet { color: var(--violet-text); }
+.ird-durations dd.warn { color: var(--warn-text); }
+
 /* Teinte selon l'état (même sens que la bande « État ») */
 .ird-card[data-tone="warn"] { border-top-color: var(--warn); background: #fffaf0; }
 .ird-card[data-tone="violet"] { border-top-color: var(--violet); background: #faf6ff; }
@@ -218,16 +237,6 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .ird-card[data-tone="warn"] .ird-why { color: var(--warn-text); }
 .ird-card[data-tone="violet"] .ird-why { color: var(--violet-text); }
 .ird-card[data-tone="bad"] .ird-why { color: var(--bad-text); }
-/* Compacte : sans les précisions secondaires, cause et programme sur une ligne (en entier au survol de la carte),
-   valeurs sur une colonne à côté de l'aperçu, courbe plus basse. Hauteurs de référence : FULL et COMPACT de card.js. */
-.ird-grid.compact .ird-values dd small, .ird-grid.compact .ird-chart-title, .ird-grid.compact .ird-axis { display: none; }
-.ird-grid.compact .ird-card { grid-template-rows: auto auto auto auto minmax(calc(20px * var(--s)), 1fr);
-  grid-template-areas: "head head" "why why" "sub sub" "values thumb" "chart chart"; }
-.ird-grid.compact .ird-values dt { width: calc(48px * var(--s)); }
-.ird-grid.compact .ird-why { -webkit-line-clamp: 1; }
-/* Tuiles de la vue d'ensemble (hauteur fixe) : programme et porteuse sur une ligne ; deux lignes sur la page de porteuse. */
-.ird-grid .ird-sub { -webkit-line-clamp: 1; }
-.ird-grid.compact .ird-values dd { font-size: calc(14px * var(--s)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* --- Vue d'ensemble --- */
 .overview-main { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: var(--sp-4); align-items: start; }
@@ -258,19 +267,26 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .notes:empty { display: none; }
 .notes { display: flex; flex-direction: column; gap: var(--sp-2); }
 .note { margin: 0; font-size: var(--fs-sm); }
-.ird-sections { --s: 1; --card-h: auto; display: grid; gap: var(--sp-3); align-items: start; }
+.ird-sections { display: grid; gap: var(--sp-3); align-items: start; }
 .ird-section { display: flex; flex-direction: column; gap: var(--sp-2); border-radius: var(--radius); }
-.ird-section .ird-card { border-left: 4px solid var(--ird-color, var(--border)); }
+/* Page de la porteuse : même tuile, proportion fixe (la tuile est un conteneur de taille : il lui faut une hauteur). */
+.ird-section .ird-card { border-left: 4px solid var(--ird-color, var(--border)); height: auto; aspect-ratio: 16 / 10;
+  min-height: 200px; max-height: 360px; }
 /* Carte étroite (trois IRD sur la porteuse, petite fenêtre) : l'aperçu passe sous la courbe plutôt que de l'écraser. */
 .ird-section { container-type: inline-size; }
+@container (max-width: 300px) {
+  /* Carte étroite (trois IRD sur une petite fenêtre) : l'image passe sous la courbe. */
+  .ird-section .ird-card { aspect-ratio: 4 / 5; max-height: none;
+    grid-template-areas: "head head" "why why" "sub sub" "num num" "chart chart" "thumb thumb";
+    grid-template-rows: auto auto auto auto minmax(40px, 1fr) auto; }
+  /* Période passée (pas de courbe ni d'image) : les durées juste sous le chiffre. */
+  .ird-section .ird-chart[hidden] ~ .ird-durations { grid-area: chart; align-self: start; }
+}
 @container (max-width: 360px) {
-  .ird-section .ird-card { grid-template-areas: "head head" "why why" "sub sub" "values values" "chart chart" "thumb thumb";
-    grid-template-rows: auto; }
   /* Détails : libellé au-dessus de sa valeur, la valeur garde toute la largeur. */
   .ird-section .ird-details { grid-template-columns: minmax(0, 1fr); }
   .ird-section .ird-details dd + dt { margin-top: var(--sp-1); }
 }
-.ird-section .ird-spark { height: 70px; flex: none; }
 .ird-section.target .ird-card { outline: 2px solid var(--accent); outline-offset: 1px; }
 .ird-details { margin: 0; padding: var(--sp-2) var(--sp-3); background: var(--surface); border: 1px solid var(--border);
   border-radius: var(--radius); font-size: var(--fs-sm); display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px var(--sp-3); }

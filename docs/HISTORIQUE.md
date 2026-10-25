@@ -2,7 +2,7 @@
 
 ## État actuel (24 octobre 2026)
 
-- Branche `main` ; 336 tests Python et 31 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Branche `main` ; 336 tests Python et 37 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
 - Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; il tourne avec le code de la v1.2.0 (la page est servie depuis le dossier du dépôt).
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
@@ -22,6 +22,8 @@
   - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable ».
 
 ## 25 octobre 2026
+
+- **Tuiles d'IRD épurées et adaptatives** (branche `tuiles-ird`, design et plan du 25/10 dans docs/superpowers) : à la demande de Max, une tuile ne montre plus que l'état, la marge (chiffre + courbe 10 min) et l'image, disposition « chiffre d'abord » (maquette C) ; programme, signal reçu et température passent dans les détails de la page de la porteuse. Grille choisie par `tileGrid` (core.js, testée) : jusqu'à 9 IRD sans défilement, hauteur plafonnée à 420 px, à égalité le moins de rangées ; au-delà de 9, grille de 9 et défilement. Fin du facteur d'échelle `--s` et du mode compact : la tuile est un conteneur CSS et tout y est dimensionné en `cqw`/`cqh` avec `clamp()`. Choix : courbe sans graduations ni texte ; badge de résumé « DÉFAUTS ». Vérifié sur la démo en 1280 × 640, 1920 × 950 et 2560 × 1300 pour 1, 2, 3, 9 et 12 IRD (pire cas : cause, nom long, badge long) : rien ne déborde ; en 3 × 3 sur petit écran, chiffre 28 px, image 80 px, courbe 28 px.
 
 - **Version v1.3.2** publiée (cartes lisibles, courbes coupées sur les trous de mesure, fonctionnement sans FSH4) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.2, notes en français. Le tag v1.3.1 reste sans release : sa fabrication s'était arrêtée sur un test qui laissait une base ouverte (WinError 32 sous Windows), corrigé.
 - **Analyse sur les IRD .141 et .143, sans FSH4** (demandée par Max) : valeurs affichées comparées à une lecture directe des IRD (identiques : 12 525,5 MHz V, 7,2 MS/s, 8PSK 3/4, marges 6,3 / 6,5 dB, -43 / -42 dBm, AH-ENC-4A H.264 1080i25, 6 et 3 voies son ; l'IRD 1 a deux voies 9 et 10 qui reprennent les PID 102 et 103, c'est sa configuration). Corrigé et ajouté :

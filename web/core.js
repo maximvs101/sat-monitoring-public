@@ -253,6 +253,36 @@ function spreadLabels(ys, gap, min, max) {
   return out;
 }
 
+// Grille des tuiles d'IRD de la vue d'ensemble : nombre de colonnes et hauteur des tuiles qui remplissent au mieux
+// la zone (width × height, en px) jusqu'à 9 IRD. Une disposition est notée par la taille de ses tuiles (hauteur
+// plafonnée) rapportée à une tuile de référence 300 × 200 ; à égalité, le moins de rangées (pas de tuile seule sur
+// une rangée quand elles tiennent côte à côte). Hauteur plafonnée : pas de tuile géante avec peu d'IRD (la largeur
+// remplit la colonne). Au-delà de 9, la grille de 9 et la page défile.
+// TILE_MIN_H : une tuile en défaut (ligne de cause comprise) tient en entier ; en dessous, la page défile.
+const TILE_GAP = 12, TILE_REF = [300, 200], TILE_MAX_H = 420, TILE_MIN_H = 145, TILE_FIT_MAX = 9;
+
+function tileGrid(n, width, height) {
+  if (n <= 0) return { cols: 1, tileH: TILE_MAX_H };
+  const count = Math.min(n, TILE_FIT_MAX);
+  let best = null;
+  for (let cols = 1; cols <= count; cols++) {
+    const rows = Math.ceil(count / cols);
+    const w = (width - TILE_GAP * (cols - 1)) / cols;
+    const h = Math.min((height - TILE_GAP * (rows - 1)) / rows, TILE_MAX_H);
+    const score = Math.min(w / TILE_REF[0], h / TILE_REF[1]);
+    if (!best || score > best.score + 1e-9 || (Math.abs(score - best.score) <= 1e-9 && rows < best.rows)) {
+      best = { cols, rows, h, score };
+    }
+  }
+  return { cols: best.cols, tileH: Math.max(best.h, TILE_MIN_H) };
+}
+
+// Chiffre de marge d'une tuile : rouge au décrochage (0 dB) ou sous le minimum réglé, sur une mesure fraîche seulement.
+function marginTone(margin, minimum, live) {
+  if (!live || margin == null) return "";
+  return margin <= 0 || (minimum > 0 && margin < minimum) ? "bad" : "";
+}
+
 // Aperçu de l'image décodée : son heure est celle de la dernière image nouvelle reçue par le service. Ancienne
 // (IRD figé, injoignable, ou direct coupé), la carte la grise ; la page compose « préfixe + heure ».
 const THUMB_STALE_MS = 10_000;
@@ -270,5 +300,5 @@ function repeatDue(r, now, prefs) {
 
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView, alignSeries, spreadLabels };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView, alignSeries, spreadLabels, tileGrid, marginTone };
 }

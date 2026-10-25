@@ -1,14 +1,12 @@
 "use strict";
 
-// Carte d'IRD, la même partout (vue d'ensemble, page de porteuse) : état en clair, valeurs clés et aperçu de l'image
-// décodée, courbe de marge avec ses seuils, bande « État ». Hors Direct, variante « résumé de la période ». Et la grille qui adapte la taille
-// des cartes à leur nombre.
+// Tuile d'IRD, la même partout (vue d'ensemble, page de porteuse), disposition « chiffre d'abord » : nom et état,
+// cause en clair si l'état n'est pas OK, marge en grand avec l'image décodée à côté, courbe de marge sur toute la
+// largeur. Hors Direct, variante « résumé de la période ». Les tailles suivent celle de la tuile (CSS, unités de
+// conteneur) ; la grille de la vue d'ensemble est choisie par tileGrid (core.js).
 
 const Card = (() => {
   const STALE_MS = 10_000;
-  // Carte de référence (échelle 1), complète puis compacte ; sous l'échelle minimale de la compacte, la page défile.
-  const BASE_W = 300, GAP = 12, MAX_SCALE = 2.2;
-  const FULL = { h: 300, min: 0.85 }, COMPACT = { h: 195, min: 0.75 };
 
   // Depuis quand la rangée « État » garde son code actuel ; au-delà de la fenêtre affichée : « plus de N min ».
   function since(d, now, from, windowMin) {
@@ -30,12 +28,14 @@ const Card = (() => {
   function build(serial, { onClick, hint = "" } = {}) {
     const h = { serial, el: el("article", { className: "ird-card", title: hint }) };
     h.hint = hint;
-    h.dot = el("span", { className: "dot" });
     h.name = el("strong", { className: "ird-name" });
     h.badge = el("span", { className: "badge" });
     h.why = el("p", { className: "ird-why" });
     h.sub = el("p", { className: "ird-sub" });
-    h.values = el("dl", { className: "ird-values" });
+    h.numLabel = el("span", { className: "ird-num-label" });
+    h.numValue = el("span", { className: "ird-num-value" });
+    h.num = el("div", { className: "ird-num" }, h.numLabel, el("span", { className: "ird-num-line" }, h.numValue,
+      el("span", { className: "ird-num-unit", textContent: "dB" })));
     h.thumbImg = el("img", { alt: "" });
     h.thumbCap = el("figcaption");
     h.thumb = el("figure", { className: "ird-thumb none" }, h.thumbImg, h.thumbCap);
@@ -46,13 +46,11 @@ const Card = (() => {
       e.stopPropagation();  // la tuile mène à la porteuse ; l'image, elle, s'agrandit sur place
       enlarge(h);
     });
-    h.chartTitle = el("p", { className: "ird-chart-title" });
     h.spark = el("canvas", { className: "ird-spark" });
     h.band = el("canvas", { className: "ird-band" });
-    h.since = el("span");
-    const axis = el("p", { className: "ird-axis" }, h.since, el("span", { textContent: "maintenant" }));
-    h.chart = el("div", { className: "ird-chart" }, h.chartTitle, h.spark, h.band, axis);
-    h.el.append(el("header", {}, h.dot, h.name, h.badge), h.why, h.sub, h.values, h.thumb, h.chart);
+    h.chart = el("div", { className: "ird-chart" }, h.spark, h.band);
+    h.durations = el("dl", { className: "ird-durations", hidden: true });
+    h.el.append(el("header", {}, h.name, h.badge), h.why, h.sub, h.num, h.thumb, h.chart, h.durations);
     if (onClick) {
       // Atteignable au clavier seulement si elle mène quelque part (Entrée ou Espace).
       h.el.classList.add("link");
@@ -113,7 +111,8 @@ const Card = (() => {
     const shown = h.thumbShown;
     const view = thumbView(shown, Date.now(), Store.state.connected);
     h.thumb.className = `ird-thumb ${view.state}`;
-    h.thumbCap.textContent = shown == null ? view.prefix : view.prefix + fmtTime(shown);
+    // Image à jour : pas d'heure (elle n'apprend rien) ; ancienne : « image de 10:41 » ; aucune : « pas d'image ».
+    h.thumbCap.textContent = view.state === "fresh" ? "" : shown == null ? view.prefix : view.prefix + fmtTime(shown).slice(0, 5);
     h.thumb.title = shown == null ? "" : "Agrandir l'image";
     h.thumb.hidden = false;
     syncViewer(h);
@@ -126,62 +125,38 @@ const Card = (() => {
     return [canvas.getContext("2d"), w, h, ratio];
   }
 
-  // Marge sur la fenêtre affichée, échelle partant de 0 dB (décrochage). Seuils : chute rapide (orange, pointillé)
-  // et minimum fixe (rouge). En compact, ni graduations ni texte : la courbe et les lignes seulement.
-  function drawSpark(canvas, d, range, drop, minimum, scale, compact) {
+  // Marge sur la fenêtre affichée, échelle partant de 0 dB (décrochage), sur toute la largeur. Seuils : chute rapide
+  // (orange, pointillé) et minimum fixe (rouge), sans texte ni graduation : la valeur est le grand chiffre, le détail
+  // est sur la page de la porteuse.
+  function drawSpark(canvas, d, range, drop, minimum) {
     const [ctx, w, h, ratio] = fit(canvas);
     ctx.clearRect(0, 0, w, h);
+    if (!w || !h) return;
     const [from, to] = range;
     const vals = d ? d.margin_db.filter((v, i) => v != null && d.ts[i] >= from) : [];
     const top = Math.max(10, Math.ceil(Math.max(0, minimum || 0, ...vals) + 1));
-    const font = Math.round(10 * scale * ratio);
-    const pad = compact ? 2 * ratio : Math.ceil(font / 2) + ratio;
-    const left = compact ? 0 : 30 * ratio * scale;
-    const x = (t) => left + ((t - from) / (to - from)) * (w - left);
+    const pad = 2 * ratio;
+    const x = (t) => ((t - from) / (to - from)) * w;
     const y = (v) => h - pad - (v / top) * (h - 2 * pad);
-    ctx.font = `${font}px -apple-system, sans-serif`;
-    ctx.textBaseline = "middle";
-    ctx.textAlign = "right";
-    ctx.strokeStyle = "#e3e6ea";
     ctx.lineWidth = ratio;
-    for (const v of [0, top]) {
-      ctx.fillStyle = "#6b7280";
-      if (!compact) ctx.fillText(`${v} dB`, left - 4 * ratio, y(v));
-      ctx.beginPath();
-      ctx.moveTo(left, y(v));
-      ctx.lineTo(w, y(v));
-      ctx.stroke();
-    }
+    ctx.strokeStyle = "#e3e6ea";
+    ctx.beginPath();
+    ctx.moveTo(0, y(0));
+    ctx.lineTo(w, y(0));
+    ctx.stroke();
     const lines = [];
-    if (minimum > 0) lines.push({ level: minimum, color: "#dc2626", dash: [], label: `minimum ${fmt(minimum, 1, "dB")}` });
-    if (drop != null && drop > 0) {
-      lines.push({ level: drop, color: "#d97706", dash: [4 * ratio, 3 * ratio], label: "alerte si chute" });
-    }
-    for (const l of lines) {
-      ctx.strokeStyle = l.color;
-      ctx.setLineDash(l.dash);
+    if (minimum > 0) lines.push([minimum, "#dc2626", []]);
+    if (drop != null && drop > 0) lines.push([drop, "#d97706", [4 * ratio, 3 * ratio]]);
+    for (const [level, color, dash] of lines) {
+      ctx.strokeStyle = color;
+      ctx.setLineDash(dash);
       ctx.beginPath();
-      ctx.moveTo(left, y(l.level));
-      ctx.lineTo(w, y(l.level));
+      ctx.moveTo(0, y(level));
+      ctx.lineTo(w, y(level));
       ctx.stroke();
-      ctx.setLineDash([]);
     }
-    // Libellés au-dessus de leur ligne (bas du texte), écartés quand les deux seuils sont proches, dessinés après la
-    // courbe avec un liseré blanc : la marge peut passer juste à leur hauteur.
-    const labels = () => {
-      if (compact) return;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "bottom";
-      ctx.lineWidth = 3 * ratio;
-      ctx.strokeStyle = "#ffffff";
-      const ys = spreadLabels(lines.map((l) => y(l.level) - 2 * ratio), font + 2 * ratio, font + ratio, h);
-      lines.forEach((l, i) => {
-        ctx.strokeText(l.label, left + 4 * ratio, ys[i]);
-        ctx.fillStyle = l.color;
-        ctx.fillText(l.label, left + 4 * ratio, ys[i]);
-      });
-    };
-    if (!d) return labels();
+    ctx.setLineDash([]);
+    if (!d) return;
     ctx.strokeStyle = "#3341c4";
     ctx.lineWidth = 1.5 * ratio;
     ctx.beginPath();
@@ -196,19 +171,17 @@ const Card = (() => {
       prev = t;
     }
     ctx.stroke();
-    labels();
   }
 
-  // Bande « État » sur la même largeur que la courbe (même décalage à gauche).
-  function drawBand(canvas, d, range, scale, compact) {
-    const [ctx, w, h, ratio] = fit(canvas);
+  // Bande « État » sous la courbe, même largeur : un trait coloré seconde par seconde, gris sans mesure.
+  function drawBand(canvas, d, range) {
+    const [ctx, w, h] = fit(canvas);
     ctx.clearRect(0, 0, w, h);
-    const left = compact ? 0 : 30 * ratio * scale;
     ctx.fillStyle = NO_DATA_COLOR;
-    ctx.fillRect(left, 0, w - left, h);
+    ctx.fillRect(0, 0, w, h);
     if (!d) return;
     const [from, to] = range;
-    const x = (t) => left + Math.max(0, ((t - from) / (to - from)) * (w - left));
+    const x = (t) => Math.max(0, ((t - from) / (to - from)) * w);
     for (let i = 0; i < d.ts.length; i++) {
       const code = d.state[i];
       if (code == null || d.ts[i] < from - 1000) continue;
@@ -218,17 +191,13 @@ const Card = (() => {
     }
   }
 
-  // Remplace le contenu d'un élément seulement s'il a changé (pas de reconstruction du DOM à chaque seconde).
+  // Remplace le contenu d'une liste seulement s'il a changé (pas de reconstruction du DOM à chaque seconde).
   function setRows(node, rows) {
     const sig = JSON.stringify(rows);
     if (node.dataset.sig === sig) return;
     node.dataset.sig = sig;
-    node.replaceChildren(...rows.map(([k, v, hint, tone]) => {
-      const dd = el("dd", { className: tone || "" }, el("span", { className: "v", textContent: v }));
-      if (hint) dd.append(el("small", { textContent: hint }));
-      dd.title = [v, hint].filter(Boolean).join(" · ");  // en entier au survol : en compacte, valeur tronquée et indication masquée
-      return el("div", {}, el("dt", { textContent: k }), dd);
-    }));
+    node.replaceChildren(...rows.map(([k, v, tone]) => el("div", {}, el("dt", { textContent: k }),
+      el("dd", { textContent: v, className: tone || "" }))));
   }
 
   function setTone(h, code) {
@@ -237,93 +206,67 @@ const Card = (() => {
     h.badge.className = `badge ${tone}`;
   }
 
-  // Direct. data : { latest, down, series, carrier, openAlerts, cfg, range, scale, compact, deviceState }
+  // Direct. data : { latest, down, deviceState, series, cfg, range }
   function update(h, data) {
-    const { latest: m, down, series: d, carrier, openAlerts = 0, cfg, range, scale = 1, compact = false } = data;
+    const { latest: m, down, series: d, cfg, range } = data;
     const minimum = cfg.margin_min_db;
     // Direct coupé, ou plus de mesure depuis STALE_MS : la dernière mesure n'est plus l'état de l'IRD.
     const seen = Store.state.seen[`ird:${h.serial}`];
     const stale = !Store.state.connected || (seen != null && Date.now() - seen > STALE_MS);
     const [title, why, code] = irdStatus(m, down, minimum, stale);
     setTone(h, code);
-    h.dot.className = `dot ${{ up: "ok", down: "bad" }[data.deviceState] || ""}`;
-    h.dot.title = [(DEVICE_STATE[data.deviceState] || ["en attente"])[0],
-      data.deviceState === "down" ? Store.state.details[`ird:${h.serial}`] : "",
-      seen ? `dernière mesure ${fmtTime(seen)}` : "aucune mesure"].filter(Boolean).join(" · ");
     h.name.textContent = Store.state.names[h.serial] || h.serial;
     h.badge.textContent = title;
+    h.badge.title = [(DEVICE_STATE[data.deviceState] || ["en attente"])[0],
+      data.deviceState === "down" ? Store.state.details[`ird:${h.serial}`] : "",
+      seen ? `dernière mesure ${fmtTime(seen)}` : "aucune mesure"].filter(Boolean).join(" · ");
     const lastCode = d?.state.length ? d.state[d.state.length - 1] : null;
-    const cause = title === "OK" ? "" : [why, code === lastCode ? since(d, Date.now(), range[0], cfg.live_window_min) : ""].filter(Boolean).join(" — ");
-    h.why.textContent = [cause, openAlerts ? `${openAlerts} alerte${openAlerts > 1 ? "s" : ""} en cours` : ""].filter(Boolean).join(" · ");
-    h.sub.textContent = [m?.service_name, carrier ? `porteuse ${carrier.name}` : null].filter(Boolean).join(" · ") || "—";
-    // Cause et programme en entier au survol : sur les tuiles, ils peuvent être tronqués à une ligne.
-    h.el.title = [h.why.textContent, h.sub.textContent, h.hint].filter(Boolean).join("\n");
+    const cause = title === "OK" ? "" : [why, code === lastCode ? since(d, Date.now(), range[0], cfg.live_window_min) : ""]
+      .filter(Boolean).join(" — ");
+    h.why.textContent = cause ? cause[0].toUpperCase() + cause.slice(1) : "";
+    h.sub.hidden = true;  // programme et porteuse : au clic (page de la porteuse)
+    h.el.title = [h.why.textContent, h.hint].filter(Boolean).join("\n");
     const live = m && !down && !stale;
-    const thr = dropThreshold(d, cfg);
-    const limits = [thr > 0 ? `chute si < ${fmt(thr, 1, "dB")}` : "", minimum > 0 ? `min. ${fmt(minimum, 1, "dB")}` : ""]
-      .filter(Boolean).join(" · ");
-    setRows(h.values, [
-      ["Marge", live ? fmt(m.margin_db, 1, "dB") : "—", (live && limits) || "réserve avant décrochage"],
-      [compact ? "Signal" : "Signal reçu", live && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—", "puissance d'entrée"],
-      [compact ? "Temp." : "Température", live && m.health?.fpga_temp != null ? `${Math.round(m.health.fpga_temp)} °C` : "—", "FPGA"],
-    ]);
+    h.numLabel.textContent = "Marge";
+    h.numValue.textContent = live && m.margin_db != null ? num(m.margin_db, 1) : "—";
+    h.num.className = `ird-num ${marginTone(m?.margin_db, minimum, live)}`;
+    h.durations.hidden = true;
     updateThumb(h, m);
     h.chart.hidden = false;
-    h.chartTitle.textContent = `Marge sur ${cfg.live_window_min} min`;
-    h.since.textContent = `il y a ${cfg.live_window_min} min`;
-    drawSpark(h.spark, d, range, thr, minimum, scale, compact);
-    drawBand(h.band, d, range, scale, compact);
+    drawSpark(h.spark, d, range, dropThreshold(d, cfg), minimum);
+    drawBand(h.band, d, range);
   }
 
   // Hors Direct : résumé de la période (aucune donnée de décodage n'est gardée dans le temps).
   function updateSummary(h, summary, { program = "", carrier = null } = {}) {
     const worst = [3, 2, 1].find((c) => summary.state_ms[c] > 0);
     setTone(h, worst ?? (summary.margin_min == null ? "idle" : 0));
-    h.dot.className = "dot";
     h.name.textContent = Store.state.names[h.serial] || h.serial;
-    h.badge.textContent = summary.margin_min == null ? "PAS DE MESURE" : worst == null ? "SANS DÉFAUT" : "DÉFAUTS SUR LA PÉRIODE";
+    h.badge.textContent = summary.margin_min == null ? "PAS DE MESURE" : worst == null ? "SANS DÉFAUT" : "DÉFAUTS";
+    h.badge.title = "";
     h.why.textContent = summary.alerts ? `${summary.alerts} alerte${summary.alerts > 1 ? "s" : ""} sur la période` : "";
+    h.sub.hidden = false;
     h.sub.textContent = [program, carrier ? `porteuse ${carrier.name}` : null].filter(Boolean).join(" · ") || "Résumé de la période";
-    setRows(h.values, [
-      ["Marge minimale", fmt(summary.margin_min, 1, "dB"), ""],
-      ["Lock perdu", fmtDuration(summary.state_ms[3]), "", summary.state_ms[3] ? "bad" : ""],
-      ["Image ou flux", fmtDuration(summary.state_ms[2]), "perdu", summary.state_ms[2] ? "violet" : ""],
-      ["BER, son, marge", fmtDuration(summary.state_ms[1]), "dégradé", summary.state_ms[1] ? "warn" : ""],
+    h.numLabel.textContent = "Marge min.";
+    h.numValue.textContent = summary.margin_min == null ? "—" : num(summary.margin_min, 1);
+    h.num.className = "ird-num";
+    h.durations.hidden = false;
+    setRows(h.durations, [
+      ["Lock perdu", fmtDuration(summary.state_ms[3]), summary.state_ms[3] ? "bad" : ""],
+      ["Image ou flux perdu", fmtDuration(summary.state_ms[2]), summary.state_ms[2] ? "violet" : ""],
+      ["Dégradé", fmtDuration(summary.state_ms[1]), summary.state_ms[1] ? "warn" : ""],
     ]);
     h.chart.hidden = true;
     h.thumb.hidden = true;  // aucune image n'est gardée : rien à montrer pour une période passée
   }
 
-  // Colonnes et échelle qui remplissent au mieux la place disponible pour n cartes d'une hauteur de référence.
-  function fill(n, width, height, baseH) {
-    let best = { cols: 1, scale: 0, tileH: baseH };
-    for (let cols = 1; cols <= Math.max(1, n); cols++) {
-      const rows = Math.ceil(n / cols);
-      const w = (width - GAP * (cols - 1)) / cols;
-      const h = (height - GAP * (rows - 1)) / rows;
-      const scale = Math.min(w / BASE_W, h / baseH);
-      if (scale > best.scale) best = { cols, scale, tileH: h };
-    }
-    best.scale = Math.min(MAX_SCALE, best.scale);
-    best.tileH = Math.min(best.tileH, baseH * best.scale * 1.15);
-    return best;
-  }
-
-  // Cartes complètes si elles tiennent, sinon compactes ; sinon taille minimale et la page défile.
+  // Grille de la vue d'ensemble : colonnes et hauteur des tuiles (tileGrid, core.js).
   function layout(n, width, height) {
-    const full = fill(n, width, height, FULL.h);
-    if (full.scale >= FULL.min) return { ...full, compact: false };
-    const compact = fill(n, width, height, COMPACT.h);
-    if (compact.scale >= COMPACT.min) return { ...compact, compact: true };
-    const cols = Math.max(1, Math.floor((width + GAP) / (BASE_W * COMPACT.min + GAP)));
-    return { cols, scale: COMPACT.min, tileH: COMPACT.h * COMPACT.min, compact: true };
+    return tileGrid(n, width, height);
   }
 
-  // Applique une disposition à la grille (colonnes, échelle --s, hauteur des cartes).
-  function applyLayout(grid, { cols, scale, tileH, compact }) {
-    grid.classList.toggle("compact", compact);
+  function applyLayout(grid, { cols, tileH }) {
     grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
-    grid.style.setProperty("--s", scale.toFixed(3));
     grid.style.setProperty("--card-h", `${Math.floor(tileH)}px`);
   }
 

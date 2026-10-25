@@ -243,3 +243,42 @@ test("étiquettes de seuils écartées quand elles se chevauchent, dans l'ordre 
   assert.deepEqual(core.spreadLabels([95, 98], 12, 0, 100), [88, 100]);         // en bas de zone : remontent
   assert.deepEqual(core.spreadLabels([44, 40, 42], 12, 0, 100), [64, 40, 52]);  // ordre vertical conservé
 });
+
+test("grille des tuiles : peu d'IRD, hauteur plafonnée", () => {
+  assert.deepEqual(core.tileGrid(2, 1380, 800), { cols: 2, tileH: 420 });
+  assert.deepEqual(core.tileGrid(1, 1380, 800), { cols: 1, tileH: 420 });
+  assert.equal(core.tileGrid(4, 1380, 800).cols, 2);
+  assert.equal(core.tileGrid(6, 1380, 800).cols, 3);
+});
+
+test("grille des tuiles : 9 IRD sans défilement sur un petit écran", () => {
+  const g = core.tileGrid(9, 736, 470);
+  assert.equal(g.cols, 3);
+  assert.ok(Math.abs(g.tileH - (470 - 24) / 3) < 1e-9);
+});
+
+test("grille des tuiles : au-delà de 9, la grille de 9 IRD (les tuiles gardent leur taille, la page défile)", () => {
+  assert.deepEqual(core.tileGrid(12, 1860, 1100), core.tileGrid(9, 1860, 1100));
+  assert.equal(core.tileGrid(9, 2400, 900).cols, 5);  // écran très large : plus de colonnes dès 9 IRD
+  assert.deepEqual(core.tileGrid(12, 736, 470), { cols: 3, tileH: core.tileGrid(9, 736, 470).tileH });
+});
+
+test("couleur du chiffre de marge : rouge sous le minimum ou au décrochage, seulement sur une mesure fraîche", () => {
+  assert.equal(core.marginTone(6.3, 3, true), "");
+  assert.equal(core.marginTone(2.5, 3, true), "bad");
+  assert.equal(core.marginTone(0, 0, true), "bad");
+  assert.equal(core.marginTone(2.5, 3, false), "");
+  assert.equal(core.marginTone(5, 0, true), "");
+});
+
+test("grille des tuiles : à hauteur plafonnée égale, une seule rangée plutôt qu'une tuile seule en dessous", () => {
+  assert.equal(core.tileGrid(3, 2016, 1020).cols, 3);   // très grand écran : 3 côte à côte
+  assert.equal(core.tileGrid(3, 1376, 764).cols, 2);    // 1080p : 2 + 1, tuiles plus grandes
+});
+
+test("grille des tuiles : hauteur minimale, la page défile plutôt que de rogner la tuile", () => {
+  const g = core.tileGrid(9, 736, 380);       // fenêtre basse (bandeau d'alarme, barre des tâches)
+  assert.equal(g.cols, 3);
+  assert.equal(g.tileH, 145);
+  assert.equal(core.tileGrid(2, 736, 100).tileH, 145);
+});

@@ -83,8 +83,7 @@ const OverviewPage = (() => {
       if (dom.grid.children[i] !== h.el) dom.grid.insertBefore(h.el, dom.grid.children[i] || null);
       Card.update(h, {
         latest: s.latest[serial], down: s.states[`ird:${serial}`] === "down", deviceState: s.states[`ird:${serial}`],
-        series: s.irds[serial], carrier: carrierOf(serial), openAlerts: Store.openEvents((e) => e.source === `ird:${serial}`).length,
-        cfg: s.cfg, range, scale: layout.scale, compact: layout.compact,
+        series: s.irds[serial], cfg: s.cfg, range,
       });
     });
   }

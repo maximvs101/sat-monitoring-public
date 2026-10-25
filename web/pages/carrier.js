@@ -28,6 +28,15 @@ const CarrierPage = (() => {
     location.hash = routeHref({ page: "carrier", key: route.key, period: route.period, ...changes, ird: undefined });
   }
 
+  // En tête du panneau « Détails » : ce que la tuile ne montre plus (programme, signal reçu, température).
+  function receptionLines(m) {
+    return [
+      ["Programme", m.service_name || "—"],
+      ["Signal reçu", m.locked && m.power_dbm != null ? fmt(m.power_dbm, 0, "dBm") : "—"],
+      ["Température", m.health?.fpga_temp != null ? `${Math.round(m.health.fpga_temp)} °C (FPGA)` : "—"],
+    ];
+  }
+
   // Panneau « Détails » d'un IRD : image, voies audio, configuration des sorties. Lignes [libellé, texte].
   function detailLines(d) {
     const lines = [];
@@ -182,7 +191,6 @@ const CarrierPage = (() => {
       let sec = sections.get(serial);
       if (!sec) {
         const card = Card.build(serial);
-        card.el.classList.add("free");
         const details = el("dl", { className: "ird-details" });
         sec = { el: el("div", { className: "ird-section" }, card.el, details), card, details };
         sec.el.dataset.serial = serial;
@@ -194,9 +202,9 @@ const CarrierPage = (() => {
       if (live()) {
         const down = s.states[`ird:${serial}`] === "down";
         const m = s.latest[serial];
-        Card.update(sec.card, { latest: m, down, deviceState: s.states[`ird:${serial}`], series: s.irds[serial], carrier,
-          openAlerts: Store.openEvents((e) => e.source === `ird:${serial}`).length, cfg: s.cfg, range: range() });
-        const lines = m && !down && m.details ? detailLines(m.details) : [];
+        Card.update(sec.card, { latest: m, down, deviceState: s.states[`ird:${serial}`], series: s.irds[serial], cfg: s.cfg,
+          range: range() });
+        const lines = m && !down ? [...receptionLines(m), ...(m.details ? detailLines(m.details) : [])] : [];
         const sig = JSON.stringify(lines);
         if (sec.details.dataset.sig !== sig) {
           sec.details.dataset.sig = sig;
