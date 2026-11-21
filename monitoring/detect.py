@@ -1,5 +1,7 @@
 """Détection d'événements à partir des mesures FSH4 et IRD."""
 
+from __future__ import annotations
+
 import logging
 import statistics
 from dataclasses import replace

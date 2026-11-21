@@ -1,5 +1,7 @@
 """Point d'entrée : collecte FSH4 + IRD, API JSON, flux direct (SSE) et page web."""
 
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -335,7 +337,7 @@ def make_server(app: App) -> ThreadingHTTPServer:
             rel = unquote(path).lstrip("/") or "index.html"
             try:
                 target = (app.web_dir / rel).resolve()
-                found = target.is_relative_to(app.web_dir) and target.is_file()
+                found = app.web_dir in target.parents and target.is_file()  # is_relative_to : Python 3.9
             except (ValueError, OSError):  # octet nul, nom trop long…
                 found = False
             if not found:

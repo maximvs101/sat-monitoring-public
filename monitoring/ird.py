@@ -1,8 +1,11 @@
 """Client XML-RPC du DR5000 Ateme, en lecture seule : réception satellite, décodage (image, son, programme),
 état matériel et journal de l'IRD."""
 
+from __future__ import annotations
+
 import http.client
 import logging
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -349,7 +352,7 @@ class IrdClient:
                     raise IrdError(f"HTTP {resp.status}")
                 try:
                     return resp.read()
-                except TimeoutError as e:  # il a répondu, mais n'a pas fini d'envoyer à temps
+                except (TimeoutError, socket.timeout) as e:  # il a répondu, mais pas tout envoyé à temps (socket.timeout : Python < 3.10)
                     raise IrdError("IRD : réponse trop lente (délai dépassé pendant la lecture)") from e
         except urllib.error.HTTPError as e:
             if e.code == 503:

@@ -1,5 +1,7 @@
 """Stockage SQLite des mesures, des états d'appareils et des événements."""
 
+from __future__ import annotations
+
 import math
 import queue
 import sqlite3

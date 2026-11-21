@@ -1,6 +1,8 @@
 """Ce qui dépend du système : chemins (code source ou exécutable autonome), modèle de configuration,
 mise en veille. Le reste de l'outil n'utilise que la bibliothèque standard de Python."""
 
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess

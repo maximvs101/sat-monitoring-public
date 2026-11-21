@@ -1,5 +1,7 @@
 """Boucle de collecte d'un appareil : cadence, horodatage, états up/down/paused."""
 
+from __future__ import annotations
+
 import logging
 import threading
 import time

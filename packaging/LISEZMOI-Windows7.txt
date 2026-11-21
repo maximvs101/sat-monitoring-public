@@ -1,0 +1,17 @@
+Monitoring satellite FSH4 + IRD — Windows 7
+===========================================
+
+Cette archive est la version pour Windows 7 (Python 3.8, 32 bits : convient à Windows 7 32 et 64 bits).
+Sur Windows 10 ou 11, prendre MonitoringSat-Windows.zip.
+Installation et utilisation : voir LISEZMOI-Windows.txt.
+
+Prérequis
+---------
+- Windows 7 SP1 (Service Pack 1).
+- Si MonitoringSat.exe signale qu'il manque api-ms-win-crt-*.dll : installer la mise à jour Microsoft
+  KB2999226 (Universal C Runtime), puis relancer.
+
+Navigateur
+----------
+- Chrome 109 ou Firefox ESR 115 au plus : ce sont les dernières versions disponibles sur Windows 7.
+- Internet Explorer ne convient pas : la page ne s'y affiche pas.

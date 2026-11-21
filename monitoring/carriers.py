@@ -4,6 +4,8 @@ Module sans état ni entrée-sortie : l'appartenance aux porteuses se recalcule 
 ce que chaque IRD reçoit (fréquence RF, polarisation, débit symbole) et des porteuses saisies à la main.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 
 from .config import CarrierEntry

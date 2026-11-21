@@ -21,6 +21,13 @@
   - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
   - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable ».
 
+## 21 novembre 2026
+
+- **Exécutable Windows 7** : sur un PC client sous Windows 7, `MonitoringSat.exe` ne démarrait pas (« il manque api-ms-win-core-path-l1-1-0.dll ») : Python 3.9 et suivants ne prennent plus en charge Windows 7. Nouveau job `windows7` dans `windows.yml`, après le job `windows` (inchangé) : Python 3.8 32 bits, tomli 2.0.1, PyInstaller 5.13.2 (dernière 5.x ; la documentation de PyInstaller annonce Windows 8 au minimum, rien dans les notes de version ne retire Windows 7), même essai de l'exécutable (sur Windows Server : prouve le fonctionnement, pas la compatibilité Windows 7), archive `MonitoringSat-Windows7.zip` avec `LISEZMOI-Windows7.txt` (Windows 7 SP1, KB2999226 si une api-ms-win-crt-*.dll manque, Chrome 109 ou Firefox ESR 115 au plus, pas Internet Explorer), jointe à la release sur tag.
+- Code compatible Python 3.8 : `from __future__ import annotations` partout, tomli si tomllib manque, `removeprefix`/`removesuffix` et `Path.is_relative_to` remplacés, `socket.timeout` intercepté avec `TimeoutError` (alias seulement depuis 3.10 : deux tests le montraient). Suite verte en 3.8.20 et 3.12.7 sur ce Mac.
+- Page : JS (syntaxe ES2022, API) et CSS (requêtes de conteneur, `cqw`/`cqh`) relus pour Chrome 109 et Firefox 115 : rien à changer.
+- À vérifier sur le vrai PC Windows 7 : démarrage de l'exécutable, page dans son navigateur.
+
 ## 25 octobre 2026
 
 - **Version v1.3.3** publiée (tuiles d'IRD épurées et adaptatives) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.3, notes en français.

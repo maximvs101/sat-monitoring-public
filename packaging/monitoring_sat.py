@@ -2,6 +2,8 @@
 config.toml, data/ et logs/ sont à côté de l'exécutable ; config.toml est créé au premier lancement.
 `--no-open` : ne pas ouvrir le navigateur (essai automatique de l'exécutable)."""
 
+from __future__ import annotations
+
 import sys
 import traceback
 

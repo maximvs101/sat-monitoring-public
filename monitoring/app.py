@@ -1,5 +1,7 @@
 """Application : collecte FSH4 + IRD multiples, porteuses, détection et diffusion du direct."""
 
+from __future__ import annotations
+
 import logging
 import queue
 import threading
@@ -56,15 +58,20 @@ class LiveBus:
                         pass
 
 
+def _sans_zero(text: str) -> str:
+    """Retire un « .0 » final (str.removesuffix n'existe qu'à partir de Python 3.9)."""
+    return text[:-2] if text.endswith(".0") else text
+
+
 def _hz(value: float) -> str:
     for unit, scale in (("GHz", 1e9), ("MHz", 1e6), ("kHz", 1e3)):
         if value >= scale:
-            return f"{value / scale:.1f}".removesuffix(".0").replace(".", ",") + f" {unit}"
+            return _sans_zero(f"{value / scale:.1f}").replace(".", ",") + f" {unit}"
     return f"{value:.0f} Hz"
 
 
 def _mhz(freq_hz: float) -> str:
-    text = f"{freq_hz / 1e6:,.1f}".removesuffix(".0")
+    text = _sans_zero(f"{freq_hz / 1e6:,.1f}")
     return text.replace(",", " ").replace(".", ",") + " MHz"
 
 

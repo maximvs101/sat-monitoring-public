@@ -1,6 +1,8 @@
 """Client SCPI du R&S FSH4, en lecture seule (aucun réglage modifié) : span, RBW, et fréquence et niveau des
 marqueurs allumés (jusqu'à 6)."""
 
+from __future__ import annotations
+
 import socket
 import time
 from dataclasses import dataclass
@@ -68,7 +70,7 @@ class FshClient:
                     raise FshError("connexion fermée par le FSH4")
                 buf += chunk
             return buf.decode(errors="replace").strip()
-        except TimeoutError as e:
+        except (TimeoutError, socket.timeout) as e:  # socket.timeout : alias de TimeoutError seulement depuis 3.10
             unknown = self._last_error_is_unknown_command()
             self.close()
             if unknown:

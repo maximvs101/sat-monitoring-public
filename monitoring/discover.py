@@ -1,5 +1,7 @@
 """Recherche du FSH4 et des IRD Ateme sur les réseaux locaux de la machine (lecture seule)."""
 
+from __future__ import annotations
+
 import http.client
 import ipaddress
 import re

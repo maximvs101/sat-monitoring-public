@@ -3,12 +3,12 @@
 Surveillance d'une réception satellite : un analyseur de spectre **R&S FSH4** et des décodeurs **Ateme DR5000** sont relevés en continu, sur une même ligne de temps, et une page web locale montre le direct, l'historique et les alertes. On relie ainsi une coupure ou une dégradation d'un décodeur à ce qui se passait côté RF, et on compare les IRD qui reçoivent la même porteuse.
 
 - **Lecture seule** : l'outil ne change aucun réglage des appareils.
-- **Rien à installer** : Python 3.11+ (bibliothèque standard uniquement), ou un exécutable Windows autonome.
+- **Rien à installer** : Python 3.8+ (bibliothèque standard uniquement), ou un exécutable Windows autonome.
 - **Alertes** : perte de lock, chute ou marge basse, BER, image perdue, son absent, programme non déchiffré, flux arrêté, défaut matériel, IRD seul en défaut sur sa porteuse, chute du niveau RF, remontée du bruit, appareil injoignable.
 
 ## Lancer
 
-- **Windows, sans rien installer** : extraire l'archive `MonitoringSat-Windows` (voir [Exécutable Windows](#exécutable-windows)) dans un dossier fixe et double-cliquer sur `MonitoringSat.exe`. L'exécutable n'est pas signé : « Informations complémentaires » puis « Exécuter quand même ».
+- **Windows, sans rien installer** : extraire l'archive `MonitoringSat-Windows` (voir [Exécutable Windows](#exécutable-windows)) dans un dossier fixe et double-cliquer sur `MonitoringSat.exe`. L'exécutable n'est pas signé : « Informations complémentaires » puis « Exécuter quand même ». Sous **Windows 7 SP1**, prendre l'archive `MonitoringSat-Windows7` (voir son `LISEZMOI-Windows7.txt`).
 - **Windows avec Python** : double-cliquer sur `monitoring.bat`.
 - **Mac** : double-cliquer sur `monitoring.command`.
 
@@ -43,7 +43,7 @@ Tout le détail (alertes et leurs seuils, marqueurs, réglages, données, API) :
 
 ## Exécutable Windows
 
-Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`).
+Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`). Un second job, `windows7`, fait de même en Python 3.8 32 bits pour Windows 7 SP1 : archive `MonitoringSat-Windows7`.
 
 - **À la main** : onglet **Actions** → « Exécutable Windows » → **Run workflow** ; l'archive est dans la rubrique **Artifacts** de l'exécution (90 jours).
 - **Version publiée** : pousser un tag `v…` (par exemple `v1.0.0`) ; l'archive est jointe à la **Release**.

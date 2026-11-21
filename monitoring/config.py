@@ -1,13 +1,19 @@
 """Chargement de config.toml en dataclasses gelées."""
 
+from __future__ import annotations
+
 import json
 import os
 import re
 import time
-import tomllib
 from urllib.parse import urlsplit
 from dataclasses import dataclass, field, fields
 from pathlib import Path
+
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11 (exécutable Windows 7, Python 3.8) : tomli, même interface
+    import tomli as tomllib
 
 
 @dataclass(frozen=True)
@@ -162,7 +168,8 @@ def _entries(cls, name, items):
 
 def _read_text(path: Path) -> str:
     """Contenu de config.toml, sans le BOM qu'ajoute le Bloc-notes de Windows (« UTF-8 avec BOM »)."""
-    return path.read_text(encoding="utf-8").removeprefix("\ufeff")
+    text = path.read_text(encoding="utf-8")
+    return text[1:] if text.startswith("\ufeff") else text
 
 
 def load_config(path: str | Path) -> Config:

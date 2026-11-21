@@ -1,6 +1,8 @@
 Monitoring satellite FSH4 + IRD — Windows
 =========================================
 
+Windows 10 ou 11. Pour Windows 7 SP1 : prendre MonitoringSat-Windows7.zip (voir son LISEZMOI-Windows7.txt).
+
 Installation
 ------------
 1. Extraire le dossier de l'archive dans un emplacement fixe, par exemple C:\MonitoringSat
