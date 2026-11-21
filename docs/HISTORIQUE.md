@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.3** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.3, `MonitoringSat-Windows.zip`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.4** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.4, `MonitoringSat-Windows.zip`, et `MonitoringSat-Windows7.zip` pour Windows 7 SP1) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
 
 ## À faire
 
@@ -23,6 +23,7 @@
 
 ## 21 novembre 2026
 
+- **Version v1.3.4** publiée (exécutable Windows 7) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.4, deux archives, notes en français.
 - **Exécutable Windows 7** : sur un PC client sous Windows 7, `MonitoringSat.exe` ne démarrait pas (« il manque api-ms-win-core-path-l1-1-0.dll ») : Python 3.9 et suivants ne prennent plus en charge Windows 7. Nouveau job `windows7` dans `windows.yml`, après le job `windows` (inchangé) : Python 3.8 32 bits, tomli 2.0.1, PyInstaller 5.13.2 (dernière 5.x ; la documentation de PyInstaller annonce Windows 8 au minimum, rien dans les notes de version ne retire Windows 7), même essai de l'exécutable (sur Windows Server : prouve le fonctionnement, pas la compatibilité Windows 7), archive `MonitoringSat-Windows7.zip` avec `LISEZMOI-Windows7.txt` (Windows 7 SP1, KB2999226 si une api-ms-win-crt-*.dll manque, Chrome 109 ou Firefox ESR 115 au plus, pas Internet Explorer), jointe à la release sur tag.
 - Code compatible Python 3.8 : `from __future__ import annotations` partout, tomli si tomllib manque, `removeprefix`/`removesuffix` et `Path.is_relative_to` remplacés, `socket.timeout` intercepté avec `TimeoutError` (alias seulement depuis 3.10 : deux tests le montraient). Suite verte en 3.8.20 et 3.12.7 sur ce Mac.
 - Page : JS (syntaxe ES2022, API) et CSS (requêtes de conteneur, `cqw`/`cqh`) relus pour Chrome 109 et Firefox 115 : rien à changer.
