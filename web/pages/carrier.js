@@ -87,7 +87,7 @@ const CarrierPage = (() => {
 
   function onEventClick(ev) {
     const pad = Store.state.cfg.event_padding_s * 1000;
-    go({ period: `${ev.ts_start - pad}-${(ev.ts_end ?? Date.now()) + pad}` });
+    go({ period: `${ev.ts_start - pad}-${(ev.ts_end ?? Store.now()) + pad}` });
   }
 
   function onSelect(from, to) {
@@ -283,7 +283,7 @@ const CarrierPage = (() => {
 
   async function loadPast() {
     const mine = ++seq;
-    const [from, to] = periodRange(route.period, Date.now(), Store.state.cfg.live_window_min);
+    const [from, to] = periodRange(route.period, Store.now(), Store.state.cfg.live_window_min);
     dom.status.textContent = "chargement…";
     try {
       const width = dom.charts.clientWidth || 1000;

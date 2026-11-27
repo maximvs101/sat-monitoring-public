@@ -14,6 +14,8 @@ MARKER_NUMBERS = range(1, 7)
 ERROR_CHECK_TIMEOUT_S = 0.5  # lecture de la file d'erreurs après une requête sans réponse
 
 
+ANSWER_MAX_BYTES = 65_536  # une réponse SCPI du FSH4 tient en une courte ligne
+
 class FshError(Exception):
     pass
 
@@ -63,12 +65,18 @@ class FshClient:
         self.connect()
         try:
             self._sock.sendall((cmd + "\n").encode())
+            # Réponse bornée en taille et en durée (le délai du socket vaut pour chaque morceau) : un appareil qui
+            # répond sans fin ne bloque pas la collecte.
+            deadline = time.monotonic() + self.cfg.timeout_s
             buf = b""
             while not buf.endswith(b"\n"):
                 chunk = self._sock.recv(4096)
                 if not chunk:
                     raise FshError("connexion fermée par le FSH4")
                 buf += chunk
+                if len(buf) > ANSWER_MAX_BYTES or time.monotonic() > deadline:
+                    self.close()  # la suite de cette réponse ne doit pas être prise pour la suivante
+                    raise FshError(f"réponse à {cmd} trop longue ou trop lente")
             return buf.decode(errors="replace").strip()
         except (TimeoutError, socket.timeout) as e:  # socket.timeout : alias de TimeoutError seulement depuis 3.10
             unknown = self._last_error_is_unknown_command()
@@ -130,6 +138,12 @@ class FshReader:
         self.settings_every_s = settings_every_s
         self.clock = clock  # monotone : un changement d'heure du système ne bloque pas le relevé des réglages
         self._settings = None
+        self._settings_at = None
+
+    def close(self) -> None:
+        """Connexion fermée (pause, changement d'appareil, arrêt) : réglages relus dès la reprise, l'opérateur a pu
+        déplacer un marqueur entre-temps."""
+        self.client.close()
         self._settings_at = None
 
     def read(self) -> FshReading:

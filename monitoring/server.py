@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import logging
 import sys
 import webbrowser
@@ -19,9 +20,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import system
-from .app import App, carrier_view
+from .app import App, ScanBusy, carrier_view
 from .carriers import Tuning, attach_markers, group_carriers
-from .config import POLARIZATIONS, CarrierEntry, check_freq_mhz, load_config
+from .config import MAX_SYMBOL_RATE_MSPS, POLARIZATIONS, CarrierEntry, check_freq_mhz, load_config
 from .ird import IrdError
 
 log = logging.getLogger("monitoring")
@@ -43,7 +44,9 @@ def valid_host(value) -> bool:
 
 
 def _number(value, name, positive=True) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or (positive and value <= 0):
+    # Nombre fini seulement : NaN ou Infinity enregistrés dans config.toml bloqueraient tout l'outil.
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
+            or (positive and value <= 0):
         raise ValueError(f"{name} invalide")
     return float(value)
 
@@ -66,10 +69,20 @@ def parse_fsh(body: dict) -> tuple:
 REQUEST_TIMEOUT_S = 30
 
 
+def _no_constant(name):
+    raise ValueError(f"valeur {name} refusée : nombre fini attendu")
+
+
 def _name(value, message) -> str:
     """Nom d'IRD ou de porteuse, sans espaces autour ; vide refusé."""
     if not isinstance(value, str) or not value.strip():
         raise ValueError(message)
+    try:
+        value.encode("utf-8")  # caractère isolé invalide (« surrogate ») : impossible à enregistrer
+    except UnicodeEncodeError:
+        raise ValueError("nom : caractère invalide") from None
+    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+        raise ValueError("nom : retour à la ligne ou caractère de contrôle refusé")
     return value.strip()
 
 
@@ -77,8 +90,8 @@ def parse_carrier(body: dict) -> CarrierEntry:
     sr = body.get("symbol_rate_msps")
     freq = check_freq_mhz(_number(body.get("freq_mhz"), "fréquence"))
     rate = None if sr is None else _number(sr, "débit symbole")
-    if rate is not None and rate <= 0:
-        raise ValueError("débit symbole : nombre positif de MS/s attendu")
+    if rate is not None and not 0 < rate <= MAX_SYMBOL_RATE_MSPS:
+        raise ValueError(f"débit symbole : entre 0 et {MAX_SYMBOL_RATE_MSPS} MS/s")
     return CarrierEntry(_name(body.get("name"), "nom de porteuse manquant"), freq, _polarization(body.get("polarization")),
                         rate, True)
 
@@ -127,7 +140,10 @@ def _int_param(params, name, default=None):
         if default is None:
             raise ValueError(f"paramètre {name} manquant")
         return default
-    value = int(values[0])
+    try:
+        value = int(values[0])
+    except ValueError:
+        raise ValueError(f"paramètre {name} : nombre entier attendu") from None
     if not -2**63 <= value < 2**63:  # au-delà, SQLite refuse le nombre (erreur 500 sinon)
         raise ValueError(f"paramètre {name} hors limites")
     return value
@@ -198,6 +214,11 @@ def make_server(app: App) -> ThreadingHTTPServer:
         def do_POST(self):
             self._guarded(self._post)
 
+        def _not_allowed(self):
+            self._guarded(lambda: self._error(405, "méthode non prise en charge"))
+
+        do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _not_allowed
+
         def _get(self):
             url = urlsplit(self.path)
             params = parse_qs(url.query)
@@ -214,6 +235,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
                     return self._json({"fsh": fsh, "irds": irds, "names": app.store.ird_names(),
                                        "carriers": carriers, "noise": list(mm.noise),
                                        "if_warning": mm.if_warning})
+                if url.path == "/api/networks":
+                    return self._json({"networks": app.networks()})
                 if url.path == "/api/devices":
                     return self._json(app.devices())
                 if url.path == "/api/carriers":
@@ -242,24 +265,47 @@ def make_server(app: App) -> ThreadingHTTPServer:
             return origin in (f"http://localhost:{port}", f"http://127.0.0.1:{port}", f"http://[::1]:{port}")
 
         def _read_json(self):
+            """Corps JSON de la requête, lu une fois (gardé dans self._body) ; None si ce n'est pas du JSON."""
             if self.headers.get("Content-Type", "").split(";")[0].strip() != "application/json":
                 return None
-            length = int(self.headers.get("Content-Length") or 0)
+            try:
+                length = int(self.headers.get("Content-Length") or 0)
+            except ValueError:
+                raise ValueError("longueur de requête invalide") from None
             if length < 0:
                 raise ValueError("longueur de requête invalide")  # sinon read(-1) attendrait la fermeture du client
             if length > 10_000:
                 raise ValueError("requête trop grande")
-            body = json.loads(self.rfile.read(length) or b"{}")
+            try:
+                body = json.loads(self.rfile.read(length) or b"{}", parse_constant=_no_constant)
+            except ValueError as e:
+                if str(e).startswith("valeur "):  # NaN, Infinity : message déjà en français
+                    raise
+                raise ValueError("corps JSON invalide") from None
             if not isinstance(body, dict):
                 raise ValueError("objet JSON attendu")
+            self._body = body
             return body
 
         def _post(self):
             path = urlsplit(self.path).path
+            # Réglages réservés à la machine du service : consultée depuis un autre poste, la page est en lecture seule.
+            if not ipaddress.ip_address(self.client_address[0]).is_loopback:
+                return self._error(403, "réglages réservés à la machine du service")
             if not self._same_origin():
                 return self._error(403, "origine refusée")
+            # Corps JSON exigé partout (la page en envoie toujours un) : un formulaire d'une autre page, envoyé par un
+            # vieux navigateur sans en-tête Origin, ne peut pas en produire sans être bloqué par le navigateur.
+            try:
+                if self._read_json() is None:
+                    return self._error(415, "JSON attendu")
+            except ValueError as e:
+                return self._error(400, str(e))
             if path == "/api/discover":
-                return self._json(app.scanner())
+                try:
+                    return self._json(app.discover())
+                except ScanBusy as e:
+                    return self._error(409, str(e))
             if path in ("/api/fsh/pause", "/api/fsh/resume") and app.fsh_absent:
                 return self._error(400, "aucun FSH4 configuré (Réglages › Appareils)")
             if path == "/api/fsh/pause":
@@ -277,9 +323,7 @@ def make_server(app: App) -> ThreadingHTTPServer:
             """Réglages du FSH4, des IRD, des porteuses et des seuils (POST), enregistrés dans config.toml."""
             removing = rest[1:] == ["remove"]
             try:
-                body = {} if removing else self._read_json()
-                if body is None:
-                    return self._error(415, "JSON attendu")
+                body = self._body
                 if kind == "detect" and not rest:
                     app.set_thresholds(*parse_thresholds(body))
                     return self._send(204)
@@ -350,6 +394,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
 
         def _live(self):
             q = app.bus.subscribe()
+            if q is None:
+                return self._error(503, "trop de pages ouvertes sur le direct")
             try:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")

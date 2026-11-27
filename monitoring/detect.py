@@ -136,14 +136,20 @@ class _DropRule:
                 changed.append(ev)
         return changed
 
-    def reset(self, det, ts, reason):
-        """Oublie la référence (nouveau réglage) ; ferme l'alerte en cours avec le motif."""
+    def reset(self, det, ts, reason, forget=True):
+        """Ferme l'alerte en cours avec le motif. forget : oublie aussi la référence (nouveau réglage) ; sinon
+        (appareil injoignable) l'historique reste, et une chute toujours là au retour rouvre l'alerte."""
         changed = []
         if self.event_id is not None:
             changed.append(det._close_with_reason(self.event_id, ts, reason))
             self.event_id = None
-        self.values.clear()
-        self.excluded.clear()
+            if not forget:
+                # La référence d'avant l'alerte reste figée une fenêtre : rouverte au retour si la marge est
+                # toujours basse.
+                self.excluded[-1][1] = ts + self.window_ms
+        if forget:
+            self.values.clear()
+            self.excluded.clear()
         return changed
 
 
@@ -174,6 +180,7 @@ class _IrdRules:
         self.log_events = {}    # nId → événement ouvert
         self.log_ids = None     # nId vus au dernier relevé (None : journal jamais lu)
         self.log_max = None
+        self.log_reopen = set()  # nId fermés par une coupure : rouverts au retour s'ils sont toujours actifs
         self.rename(name)
 
     def rename(self, name: str) -> None:
@@ -262,15 +269,17 @@ class Detector:
         return changed
 
     def _close_reception(self, r: _IrdRules, ts: int, reason: str) -> list[dict]:
-        """Lock, lock TS, BER, marge et messages du journal de l'IRD, fermés avec le motif."""
+        """IRD injoignable : lock, lock TS, BER, marge et messages du journal, fermés avec le motif. La référence de
+        marge et les messages du journal sont gardés : toujours là au retour, ils se rouvrent."""
         changed = []
         for attr in ("lock_event", "ts_lock_event", "ber_event"):
             if getattr(r, attr) is not None:
                 changed.append(self._close_with_reason(getattr(r, attr), ts, reason))
                 setattr(r, attr, None)
-        changed += r.margin.reset(self, ts, reason)
+        changed += r.margin.reset(self, ts, reason, forget=False)
         changed += self._close_low(r, ts, reason)
         changed += [self._close_with_reason(e, ts, reason) for e in r.log_events.values()]
+        r.log_reopen |= set(r.log_events)
         r.log_events.clear()
         return changed
 
@@ -411,7 +420,8 @@ class Detector:
         for n_id in [n for n in r.log_events if n not in ids]:  # message disparu du journal
             changed.append(self._close(r.log_events.pop(n_id), ts))
         # Les nId de l'IRD sont croissants : un nId nouveau sous le plus grand déjà vu trahit un journal remis à zéro.
-        if r.log_ids is None or (r.log_max is not None and any(n < r.log_max for n in ids - r.log_ids)):
+        reopen, r.log_reopen = r.log_reopen, set()
+        if r.log_ids is None or (r.log_max is not None and any(n < r.log_max for n in ids - r.log_ids - reopen)):
             # Premier relevé, ou journal repart de zéro (IRD redémarré) : on mémorise sans créer d'événement ;
             # les messages d'avant ne veulent plus rien dire.
             changed += [self._close_with_reason(e, ts, LOG_RESET_REASON) for e in r.log_events.values()]
@@ -421,7 +431,7 @@ class Detector:
         for m in messages:
             if m.n_id in r.log_events and m.ended:
                 changed.append(self._close(r.log_events.pop(m.n_id), ts))
-            elif m.n_id not in r.log_ids:
+            elif m.n_id not in r.log_ids or (m.n_id in reopen and not m.ended):
                 severity = LOG_SEVERITY.get(m.level, CRITICAL)
                 text = m.details or f"message sans texte ({m.level})"
                 event_id, ev = self._open(ts, "ird_log", severity, f"{r.name} : {text}", r.source)

@@ -1,7 +1,8 @@
 Monitoring satellite FSH4 + IRD — Windows
 =========================================
 
-Windows 10 ou 11. Pour Windows 7 SP1 : prendre MonitoringSat-Windows7.zip (voir son LISEZMOI-Windows7.txt).
+Même mode d'emploi pour les deux archives : MonitoringSat-Windows.zip (Windows 10 ou 11) et MonitoringSat-Windows7.zip
+(Windows 7 SP1, voir aussi LISEZMOI-Windows7.txt).
 
 Installation
 ------------
@@ -11,7 +12,7 @@ Installation
    Au premier lancement, Windows peut afficher « Windows a protégé votre ordinateur » (l'exécutable n'est pas
    signé) : cliquer sur « Informations complémentaires », puis « Exécuter quand même ».
 3. La page s'ouvre dans le navigateur : http://localhost:8080
-4. Bouton « Appareils… » : renseigner l'adresse du FSH4, ajouter les IRD (ou « Rechercher sur le réseau »).
+4. Menu « Réglages › Appareils » : renseigner l'adresse du FSH4 (vide s'il n'y en a pas), ajouter les IRD (ou « Rechercher sur le réseau »).
 
 Le PC doit être sur le même réseau que le FSH4 et les IRD.
 
@@ -19,7 +20,7 @@ Utilisation
 -----------
 - Laisser la fenêtre noire ouverte : c'est le service. La fermer arrête la surveillance.
 - Le PC ne se met pas en veille tant que le service tourne (l'écran peut s'éteindre).
-- Seuils d'alerte : bouton « Seuils… » de la page.
+- Seuils d'alerte : menu « Réglages › Seuils d'alerte » de la page.
 
 Fichiers créés à côté de MonitoringSat.exe
 ------------------------------------------

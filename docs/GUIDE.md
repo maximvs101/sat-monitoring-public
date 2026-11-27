@@ -55,13 +55,13 @@ Un menu à gauche mène à chaque page ; l'adresse de la page (avec sa période)
 | Journal IRD | nouveau message du journal de l'IRD (relevé toutes les 10 s) ; un message d'information est une simple trace, un avertissement ou une erreur reste ouvert jusqu'à sa fin. Les messages présents au démarrage sont ignorés |
 | Chute du niveau marqueur | idem sur le marqueur central d'une porteuse, seuil 3 dB |
 | Remontée du bruit | idem en hausse sur la moyenne des marqueurs hors porteuse, seuil 3 dB |
-| Appareil injoignable | 3 échecs de suite (un IRD qui répond « occupé », HTTP 503, n'est pas en échec) |
+| Appareil injoignable | 3 échecs de suite (un IRD qui répond « occupé », HTTP 503, n'est pas en échec, sauf au-delà de 10 réponses « occupé » de suite) |
 | Réglage FSH4 modifié | marqueur allumé, éteint ou déplacé, span ou RBW changé |
 | Appareils changés | nouvelle adresse du FSH4 |
 
 Une perte de lock ferme les alertes image, son, déchiffrement et flux en cours (« réception perdue ») : seule la cause la plus haute reste affichée. De même, un flux d'entrée arrêté n'ouvre que « Flux d'entrée arrêté » (pas « Image perdue » en plus). Un IRD injoignable ferme ses alertes de réception, de décodage, de journal et de matériel (« IRD injoignable ») : elles se rouvrent à la première lecture si le défaut est toujours là. Un FSH4 mis en pause ferme son « Appareil injoignable ».
 
-La référence d'une chute est la médiane de la minute précédente. Elle est figée pendant une alerte et environ deux minutes après (le temps que la fenêtre d'une minute ne contienne plus que des mesures d'après l'alerte), pour qu'un retour partiel ne la fasse pas dériver. Un changement de modulation, de débit symbole ou de porteuse sur un IRD remet sa référence de marge à zéro et ferme une chute de marge en cours (« réception modifiée »).
+La référence d'une chute est la médiane de la minute précédente. Elle est figée pendant une alerte et la minute qui suit ; la minute d'après, les mesures de l'alerte sont encore écartées de la médiane. Un retour partiel ne la fait donc pas dériver. Un changement de modulation, de débit symbole ou de porteuse sur un IRD remet sa référence de marge à zéro et ferme une chute de marge en cours (« réception modifiée »).
 
 ## IRD déverrouillé
 
@@ -72,7 +72,7 @@ Quand le démodulateur décroche, le DR5000 met sa puissance d'entrée, son déb
 - **Alerte critique** (perte de lock, image perdue, flux arrêté, programme non déchiffré, appareil injoignable…) : alarme à deux tons, répétée toutes les 30 s (réglable : 15 s, 1 min, jamais) jusqu'à ce qu'on clique **Acquitter** dans le bandeau rouge en haut de la page, ou que l'alerte se referme d'elle-même.
 - La répétition s'arrête d'elle-même après 15 min (réglable : 5 min, 1 h, jamais) : un appareil éteint volontairement ne sonne pas indéfiniment ; le bandeau reste affiché, avec la mention « alarme arrêtée après … ».
 - **Silence 1 h** (dans le bandeau) : plus d'alarme pour cet appareil pendant une heure, le temps d'une intervention ; cartes, journal et bandeau des autres appareils restent à jour.
-- Une alerte acquittée que le service rouvre en redémarrant (il ferme les alertes en cours en s'arrêtant, avec la mention « — service arrêté » : à l'heure de l'arrêt, ou après un arrêt brutal — veille, coupure — à la dernière heure où il tournait, notée toutes les 30 s) ne resonne pas : l'acquittement vaut pour cet appareil et ce type d'alerte jusqu'à ce que l'alerte se termine vraiment. Les alertes déjà en cours au chargement de la page comptent comme acquittées.
+- Une alerte acquittée que le service rouvre en redémarrant (il ferme les alertes en cours en s'arrêtant, avec la mention « — service arrêté » : à l'heure de l'arrêt, ou après un arrêt brutal — veille, coupure — à la dernière heure où il tournait, notée toutes les 30 s) ne resonne pas : l'acquittement vaut pour cet appareil et ce type d'alerte jusqu'à ce que l'alerte se termine vraiment. Les alertes déjà en cours au chargement de la page comptent comme acquittées. Un acquittement est oublié dès que la panne se termine vraiment, même page fermée : la panne suivante du même appareil sonnera.
 - **Avertissement** (BER élevé, chute ou marge basse, son absent…) : un bip, une seule fois.
 - Seules les alertes qui s'ouvrent après le chargement de la page sonnent : recharger la page ne relance pas l'alarme des alertes déjà en cours.
 - **Son coupé / activé** depuis le menu (sous « en direct ») ; son coupé, le bandeau d'acquittement reste affiché. Les navigateurs n'autorisent le son qu'après un premier clic dans la page : le menu affiche alors « Activer le son ».
@@ -94,7 +94,7 @@ Changer un seuil ferme une « Marge basse » en cours (« seuil modifié ») ; e
 - **Pas de FSH4 sur le site** : laisser l'adresse vide (`host = ""` dans `[fsh]`). Le service ne le lit pas, n'ouvre aucune alerte « injoignable », la vue d'ensemble affiche « Analyseur FSH4 : aucun » et les pages de porteuse n'ont plus de graphe « Niveau RF » ; la puissance d'entrée des IRD tient lieu de niveau RF. Après un changement de FSH4, la « dernière mesure » de l'ancien n'est plus affichée.
 - **IRD** : tableau des IRD suivis (nom modifiable, adresse modifiable, **polarisation**, porteuse reçue, état), **Retirer** (son historique est conservé), champ **Ajouter un IRD** par son adresse.
 - **Polarisation d'un IRD** : en général le LNB est alimenté par un autre équipement (répartiteur, multiswitch…) et le réglage de polarisation de l'IRD ne veut rien dire. En *automatique*, l'outil ne le prend en compte que si l'IRD alimente lui-même le LNB ; sinon la polarisation est inconnue et la section de la porteuse affiche « Polarisation inconnue pour … : à renseigner dans Réglages › Appareils ». Choisir *verticale* ou *horizontale* une fois pour toutes : c'est ce qui sépare deux transpondeurs V et H de même fréquence.
-- **Rechercher sur le réseau** parcourt les réseaux auxquels la machine est branchée (lus avec `ifconfig` sur Mac et Linux, `ipconfig` sous Windows ; chaque réseau limité à 254 adresses) : **Utiliser** pour un FSH, **Ajouter** pour un IRD Ateme pas encore suivi. La recherche n'envoie que des requêtes de lecture : `*IDN?` sur le port 5555, et la requête d'état de l'interface web des IRD.
+- **Rechercher sur le réseau** parcourt les réseaux auxquels la machine est branchée (lus avec `ifconfig` sur Mac et Linux, `ipconfig` sous Windows ; chaque réseau limité à 254 adresses) : **Utiliser** pour un FSH, **Ajouter** pour un IRD Ateme pas encore suivi. La recherche n'envoie que des requêtes de lecture : `*IDN?` sur le port 5555, et la requête d'état de l'interface web des IRD. La page nomme d'abord les réseaux qui seront parcourus et demande confirmation.
 
 Tout est appliqué sans redémarrer le service et enregistré dans `config.toml` (`[[irds]]`, `[[carriers]]`, `[fsh]`).
 
@@ -120,8 +120,9 @@ Tout est dans `config.toml` : appareils, porteuses saisies, cadences, seuils de 
 
 Le service ne fait que lire : il ne change aucun réglage du FSH4 ni des IRD. Les marqueurs du FSH4 se placent depuis l'appareil. Ce qui est envoyé, en tout et pour tout :
 
-- **FSH4** (SCPI, port 5555) : `FREQ:SPAN?`, `BAND?` et `CALC:MARKn?` toutes les 10 s, `CALC:MARKn:X?` puis `CALC:MARKn:Y?` seulement pour un marqueur que `CALC:MARKn?` vient de dire allumé ; `*IDN?` pendant une recherche réseau.
-- **IRD** (`POST /xml-rpc`) : `<refresh/>` chaque seconde, `<status type="status"/>` et `<logs type="logs"/>` toutes les 10 s.
+- **FSH4** (SCPI, port 5555) : toutes les 10 s, `FREQ:SPAN?`, `BAND?` et, pour chaque marqueur, `CALC:MARKn?` puis `CALC:MARKn:X?` (fréquence) s'il est allumé ; à chaque cycle (4 par seconde), `CALC:MARKn?` puis `CALC:MARKn:Y?` (niveau) pour chaque marqueur allumé. `:X?` et `:Y?` ne partent que juste après un `CALC:MARKn?` qui dit le marqueur allumé (sur le firmware V1.20, ils rallument un marqueur éteint). `SYST:ERR?` (lecture de la file d'erreurs) quand une requête reste sans réponse ; `*IDN?` pendant une recherche réseau.
+- **IRD** (`POST /xml-rpc`) : `<refresh/>` chaque seconde, `<status type="status"/>` et `<logs type="logs"/>` toutes les 10 s ; `GET /thumbnail.jpg` (aperçu de l'image décodée) toutes les ~2,5 s.
+- **Recherche sur le réseau** : sur chaque adresse des réseaux locaux, `*IDN?` au port 5555 et `<status type="status"/>` au port 80, puis `<refresh/>` pour un IRD Ateme trouvé.
 
 ## Données
 
@@ -149,9 +150,10 @@ Toutes les réponses sont en JSON ; horodatages en millisecondes.
 | `POST /api/irds`, `/api/irds/<série>`, `/api/irds/<série>/remove` | IRD : ajout, nom/adresse/polarisation, retrait |
 | `POST /api/carriers`, `/api/carriers/<clé>`, `/api/carriers/<clé>/remove` | porteuses saisies : ajout, nom, suppression |
 | `POST /api/detect` | seuils de marge : `margin_drop_db` (0,5 à 20), `margin_min_db` (0 à 30, 0 = désactivée) |
-| `POST /api/discover` | recherche réseau |
+| `GET /api/networks` | réseaux que la recherche parcourrait |
+| `POST /api/discover` | recherche réseau (une à la fois) |
 
-Les `POST` ne sont acceptés que depuis la page elle-même (même origine). Toute requête dont le nom d'hôte n'est ni `localhost` ni une adresse IP est refusée (protection contre le rattachement DNS : une page d'un autre site ne peut pas lire les données du service). Les fichiers de la page sont revalidés à chaque chargement (`Cache-Control: no-cache`) : après une mise à jour, le navigateur ne garde pas d'anciens scripts.
+Les `POST` (réglages, pause du FSH4, recherche) ne sont acceptés que depuis la machine du service, depuis la page elle-même (même origine) et avec un corps JSON : consultée depuis un autre poste, la page est en lecture seule. 32 pages au plus suivent le direct en même temps. Toute requête dont le nom d'hôte n'est ni `localhost` ni une adresse IP est refusée (protection contre le rattachement DNS : une page d'un autre site ne peut pas lire les données du service). Les fichiers de la page sont revalidés à chaque chargement (`Cache-Control: no-cache`) : après une mise à jour, le navigateur ne garde pas d'anciens scripts.
 
 ## Limites en détail
 

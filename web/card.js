@@ -109,7 +109,7 @@ const Card = (() => {
       }
     }
     const shown = h.thumbShown;
-    const view = thumbView(shown, Date.now(), Store.state.connected);
+    const view = thumbView(shown, Store.now(), Store.state.connected);
     h.thumb.className = `ird-thumb ${view.state}`;
     // Image à jour : pas d'heure (elle n'apprend rien) ; ancienne : « image de 10:41 » ; aucune : « pas d'image ».
     h.thumbCap.textContent = view.state === "fresh" ? "" : shown == null ? view.prefix : view.prefix + fmtTime(shown).slice(0, 5);
@@ -212,7 +212,7 @@ const Card = (() => {
     const minimum = cfg.margin_min_db;
     // Direct coupé, ou plus de mesure depuis STALE_MS : la dernière mesure n'est plus l'état de l'IRD.
     const seen = Store.state.seen[`ird:${h.serial}`];
-    const stale = !Store.state.connected || (seen != null && Date.now() - seen > STALE_MS);
+    const stale = !Store.state.connected || (seen != null && Store.now() - seen > STALE_MS);
     const [title, why, code] = irdStatus(m, down, minimum, stale);
     setTone(h, code);
     h.name.textContent = Store.state.names[h.serial] || h.serial;
@@ -221,7 +221,7 @@ const Card = (() => {
       data.deviceState === "down" ? Store.state.details[`ird:${h.serial}`] : "",
       seen ? `dernière mesure ${fmtTime(seen)}` : "aucune mesure"].filter(Boolean).join(" · ");
     const lastCode = d?.state.length ? d.state[d.state.length - 1] : null;
-    const cause = title === "OK" ? "" : [why, code === lastCode ? since(d, Date.now(), range[0], cfg.live_window_min) : ""]
+    const cause = title === "OK" ? "" : [why, code === lastCode ? since(d, Store.now(), range[0], cfg.live_window_min) : ""]
       .filter(Boolean).join(" — ");
     h.why.textContent = cause ? cause[0].toUpperCase() + cause.slice(1) : "";
     h.sub.hidden = true;  // programme et porteuse : au clic (page de la porteuse)

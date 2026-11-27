@@ -1,10 +1,12 @@
 import http.client
+import ipaddress
 import json
 import tempfile
 import threading
 import time
 import unittest
 from dataclasses import replace
+from unittest import mock
 from pathlib import Path
 
 from monitoring.app import App
@@ -35,7 +37,8 @@ class ServerTest(unittest.TestCase):
         self.closed = 0
         self.app = App(self.cfg, fsh_read=lambda: READING, fsh_close=self._count_close,
                        ird_factory=self.irds.factory, web_dir=self.web, config_path=self.cfg_path,
-                       scanner=lambda: {"networks": ["10.0.0.0/24"], "fsh": [], "ird": []})
+                       scanner=lambda: {"networks": ["10.0.0.0/24"], "fsh": [], "ird": []},
+                       networks=lambda: ["10.0.0.0/24"])
         self.addCleanup(self.app.stop)
         self.httpd = make_server(self.app)
         threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
@@ -65,7 +68,7 @@ class ServerTest(unittest.TestCase):
         return json.loads(body)
 
     def post(self, path, body=None, headers=None):
-        return self.request("POST", path, body, headers)
+        return self.request("POST", path, {} if body is None else body, headers)
 
     def step(self):
         self.app.fsh_loop.step()
@@ -257,6 +260,43 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.post("/api/fsh/resume")[0], 400)
         self.assertEqual(self.post("/api/fsh/pause")[0], 400)
 
+    def test_post_without_json_refused(self):
+        # Formulaire d'une autre page (vieux navigateur sans Origin) : sans corps JSON, aucune action.
+        for path in ("/api/fsh/pause", "/api/discover", "/api/irds/S1/remove"):
+            self.assertEqual(self.request("POST", path)[0], 415, path)
+        self.assertIn("S1", self.app.ird_loops)
+
+    def test_post_only_from_this_machine(self):
+        # Consultation depuis un autre poste : lecture seule, les réglages restent réservés à la machine du service.
+        with mock.patch.object(ipaddress.IPv4Address, "is_loopback", new_callable=mock.PropertyMock, return_value=False):
+            self.assertEqual(self.post("/api/fsh/pause")[0], 403)
+        self.assertEqual(self.get("/api/status")[0], 200)
+
+    def test_error_messages_in_french(self):
+        for path in ("/api/series?from=abc&to=2", "/api/events?from=1.5&to=2"):
+            status, body = self.get(path)
+            self.assertEqual(status, 400)
+            self.assertIn("entier", json.loads(body)["erreur"])
+        status, body = self.request("POST", "/api/detect", raw="pas du json")
+        self.assertEqual((status, json.loads(body)["erreur"]), (400, "corps JSON invalide"))
+        status, body = self.request("POST", "/api/detect", headers={"Content-Length": "abc"}, raw="{}")
+        self.assertEqual(status, 400)
+
+    def test_other_methods_json_405(self):
+        for method in ("PUT", "DELETE", "PATCH"):
+            status, body = self.request(method, "/api/status")
+            self.assertEqual(status, 405, method)
+            self.assertIn("erreur", json.loads(body))
+
+    def test_names_with_control_characters_refused(self):
+        self.assertEqual(self.post("/api/irds/S1", {"name": "a\nb"})[0], 400)
+        self.assertEqual(self.post("/api/carriers", {"name": "x\ty", "freq_mhz": 11685.0})[0], 400)
+
+    def test_live_streams_capped(self):
+        from monitoring import app as app_module
+        with mock.patch.object(app_module, "MAX_SUBSCRIBERS", 0):
+            self.assertEqual(self.get("/api/live")[0], 503)
+
     def test_json_required(self):
         status, _ = self.request("POST", "/api/fsh", headers={"Content-Type": "text/plain"},
                                  raw=json.dumps({"host": "10.0.0.8", "port": 5555}))
@@ -325,6 +365,26 @@ class ServerTest(unittest.TestCase):
                      {"name": "x", "freq_mhz": 11685.0, "symbol_rate_msps": -1}):
             self.assertEqual(self.post("/api/carriers", body)[0], 400, body)
 
+    def test_add_carrier_rejects_non_finite_rate(self):
+        # NaN ou Infinity (JSON accepté par Python) enregistrés dans config.toml bloquaient toute l'API.
+        for raw in ('{"name":"x","freq_mhz":14000,"symbol_rate_msps":NaN}',
+                    '{"name":"x","freq_mhz":14000,"symbol_rate_msps":Infinity}',
+                    '{"name":"x","freq_mhz":14000,"symbol_rate_msps":1e308}',
+                    '{"name":"x","freq_mhz":NaN}'):
+            status, body = self.request("POST", "/api/carriers", raw=raw)
+            self.assertEqual(status, 400, raw)
+        self.assertNotIn("nan", self.cfg_path.read_text(encoding="utf-8").lower())
+        self.assertNotIn("inf", self.cfg_path.read_text(encoding="utf-8").lower())
+        self.assertEqual(self.get("/api/status")[0], 200)
+
+    def test_ird_name_with_lone_surrogate_refused(self):
+        # Un nom impossible à écrire en UTF-8 bloquait toutes les modifications d'IRD suivantes.
+        self.app.add_ird("10.0.0.2")
+        status, _ = self.request("POST", "/api/irds/S1", raw='{"name":"\\ud800x"}')
+        self.assertEqual(status, 400)
+        self.assertEqual(self.post("/api/irds/S2", {"name": "IRD deux"})[0], 204)  # un autre IRD
+        self.assertEqual(self.app.names["S1"], "IRD 1")
+
     # --- Sécurité et divers ---
 
     def test_foreign_origin_forbidden(self):
@@ -368,6 +428,28 @@ class ServerTest(unittest.TestCase):
             pass
         s.close()
         self.assertLess(time.monotonic() - t0, 2.5)
+
+    def test_networks_listed_before_scan(self):
+        # La page dit quels réseaux seront parcourus avant de lancer la recherche.
+        self.assertEqual(self.get_json("/api/networks"), {"networks": ["10.0.0.0/24"]})
+
+    def test_discover_not_run_twice_at_once(self):
+        # Une recherche réseau à la fois : une seconde demande pendant la première est refusée.
+        started, release = threading.Event(), threading.Event()
+
+        def slow_scan():
+            started.set()
+            release.wait(5)
+            return {"networks": [], "fsh": [], "ird": []}
+        self.app.scanner = slow_scan
+        first = []
+        t = threading.Thread(target=lambda: first.append(self.post("/api/discover")[0]))
+        t.start()
+        started.wait(5)
+        self.assertEqual(self.post("/api/discover")[0], 409)
+        release.set()
+        t.join(5)
+        self.assertEqual(first, [200])
 
     def test_discover(self):
         status, body = self.post("/api/discover", None, {"Origin": f"http://localhost:{self.port}"})
@@ -418,7 +500,7 @@ class StartupTest(unittest.TestCase):
         from monitoring.server import startup_message
         cfg = replace(Config(), irds=(IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("", "IRD", "10.0.0.2")))
         msg = startup_message(cfg, 8080)
-        self.assertIn("FSH4 192.168.20.222:5555", msg)
+        self.assertIn("FSH4 aucun", msg)  # par défaut : pas de FSH4
         self.assertIn("IRD 1 (10.0.0.1)", msg)
         self.assertIn("IRD (10.0.0.2)", msg)
         self.assertIn("http://127.0.0.1:8080", msg)

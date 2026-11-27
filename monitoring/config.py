@@ -13,12 +13,16 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # Python < 3.11 (exécutable Windows 7, Python 3.8) : tomli, même interface
-    import tomli as tomllib
+    try:
+        import tomli as tomllib
+    except ModuleNotFoundError:
+        raise SystemExit("Python 3.11 ou plus récent requis ; avec Python 3.8 à 3.10, installer d'abord le module "
+                         "tomli : python3 -m pip install tomli") from None
 
 
 @dataclass(frozen=True)
 class FshConfig:
-    host: str = "192.168.20.222"
+    host: str = ""  # vide : pas de FSH4
     port: int = 5555
     rate_hz: float = 4.0
     timeout_s: float = 2.0
@@ -106,8 +110,20 @@ def _check(cls, where, values):
         raise ValueError(f"clé inconnue dans {where} : {', '.join(sorted(unknown))}")
     if values.get("polarization") not in (None, *POLARIZATIONS):
         raise ValueError(f"polarisation inconnue dans {where} : {values['polarization']!r}")
+    # Texte et booléens au bon type : un numéro de série écrit sans guillemets (1234) ne correspondrait jamais à celui
+    # lu sur l'IRD, et « manual = "false" » vaudrait vrai.
+    for f in fields(cls):
+        v = values.get(f.name)
+        if v is None:
+            continue
+        if f.name in TEXT_KEYS and not isinstance(v, str):
+            raise ValueError(f"{where} {f.name} : texte entre guillemets attendu, pas {v!r}")
+        if f.name in BOOL_KEYS and not isinstance(v, bool):
+            raise ValueError(f"{where} {f.name} : true ou false attendu, pas {v!r}")
 
 
+TEXT_KEYS = {"serial", "name", "host"}
+BOOL_KEYS = {"manual"}
 # Valeurs qui doivent être strictement positives (0 bloquerait la collecte ou diviserait par zéro).
 POSITIVE = {"port", "rate_hz", "timeout_s", "retry_s", "down_after_failures", "live_window_min", "max_points",
             "median_window_s", "ber_threshold", "margin_drop_db", "marker_drop_db", "noise_rise_db"}
@@ -194,11 +210,14 @@ def load_config(path: str | Path) -> Config:
     return Config(**sections, irds=irds, carriers=carriers)
 
 
+MAX_SYMBOL_RATE_MSPS = 200  # bien au-delà de toute porteuse satellite ; exclut NaN, Infinity et 1e308
+
+
 def _rate(value):
     if value is None:
         return None
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
-        raise ValueError(f"[[carriers]] symbol_rate_msps : nombre positif de MS/s attendu, pas {value!r}")
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= MAX_SYMBOL_RATE_MSPS:
+        raise ValueError(f"[[carriers]] symbol_rate_msps : entre 0 et {MAX_SYMBOL_RATE_MSPS} MS/s attendu, pas {value!r}")
     return float(value)
 
 
@@ -283,18 +302,26 @@ def _write(path: Path, text: str) -> None:
     """Écriture sûre : fichier temporaire écrit jusqu'au disque, puis remplacement (retenté si Windows le refuse un
     instant, antivirus ou indexeur) ; une coupure de courant ne laisse jamais un config.toml vide."""
     tmp = path.with_suffix(".tmp")
-    with open(tmp, "w", encoding="utf-8") as f:
-        f.write(text)
-        f.flush()
-        os.fsync(f.fileno())
-    for attempt in range(WRITE_ATTEMPTS):
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        for attempt in range(WRITE_ATTEMPTS):
+            try:
+                tmp.replace(path)
+                return
+            except PermissionError:
+                if attempt == WRITE_ATTEMPTS - 1:
+                    raise
+                time.sleep(0.2)
+    finally:
         try:
-            tmp.replace(path)
-            return
-        except PermissionError:
-            if attempt == WRITE_ATTEMPTS - 1:
-                raise
-            time.sleep(0.2)
+            tmp.unlink()  # échec : pas de fichier temporaire à moitié écrit laissé à côté de config.toml
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
 
 
 def save_fsh(path: str | Path, host: str, port: int, polarization: str | None) -> None:

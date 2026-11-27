@@ -89,7 +89,7 @@ const OverviewPage = (() => {
   }
 
   function targetOf(ev) {
-    return eventTarget(ev, Store.state.carriers, Date.now(), Store.state.cfg.event_padding_s * 1000);
+    return eventTarget(ev, Store.state.carriers, Store.now(), Store.state.cfg.event_padding_s * 1000);
   }
 
   // Événement d'un IRD : la porteuse où il était à ce moment-là (il a pu être re-réglé depuis), comme le journal.

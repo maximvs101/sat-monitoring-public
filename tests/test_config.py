@@ -71,7 +71,7 @@ class ConfigTest(unittest.TestCase):
     def test_override_one_key(self):
         cfg = load_config(write("[fsh]\nrate_hz = 2.0\n"))
         self.assertEqual(cfg.fsh.rate_hz, 2.0)
-        self.assertEqual(cfg.fsh.host, "192.168.20.222")
+        self.assertEqual(cfg.fsh.host, "")  # par défaut : pas de FSH4
 
     def test_unknown_key_raises(self):
         with self.assertRaises(ValueError):
@@ -183,3 +183,55 @@ class ConfigTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NonFiniteTest(unittest.TestCase):
+    def test_non_finite_symbol_rate_refused_at_load(self):
+        import tempfile
+        from pathlib import Path
+        from monitoring.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            for value in ("nan", "inf", "1e308"):
+                p = Path(d) / "config.toml"
+                p.write_text(f'[[carriers]]\nname = "x"\nfreq_mhz = 14000.0\nsymbol_rate_msps = {value}\n', encoding="utf-8")
+                with self.assertRaises(ValueError, msg=value):
+                    load_config(p)
+
+
+class WriteFailureTest(unittest.TestCase):
+    def test_tmp_file_removed_when_replace_fails(self):
+        import tempfile
+        from pathlib import Path
+        from unittest import mock
+        from monitoring.config import _write
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text("ancien", encoding="utf-8")
+            with mock.patch("monitoring.config.WRITE_ATTEMPTS", 1), \
+                    mock.patch.object(Path, "replace", side_effect=PermissionError("verrouillé")):
+                with self.assertRaises(PermissionError):
+                    _write(p, "nouveau")
+            self.assertEqual(sorted(x.name for x in Path(d).iterdir()), ["config.toml"])
+            self.assertEqual(p.read_text(encoding="utf-8"), "ancien")
+
+
+class EntryTypesTest(unittest.TestCase):
+    def check(self, text):
+        import tempfile
+        from pathlib import Path
+        from monitoring.config import load_config
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "config.toml"
+            p.write_text(text, encoding="utf-8")
+            with self.assertRaises(ValueError):
+                load_config(p)
+
+    def test_ird_serial_must_be_text(self):
+        self.check('[[irds]]\nserial = 1234\nname = "IRD 1"\nhost = "10.0.0.1"\n')
+
+    def test_carrier_manual_must_be_boolean(self):
+        self.check('[[carriers]]\nname = "x"\nfreq_mhz = 11685.0\nmanual = "false"\n')
+
+    def test_default_fsh_is_none(self):
+        from monitoring.config import FshConfig
+        self.assertEqual(FshConfig().host, "")

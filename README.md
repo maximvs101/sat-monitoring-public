@@ -3,7 +3,7 @@
 Surveillance d'une réception satellite : un analyseur de spectre **R&S FSH4** et des décodeurs **Ateme DR5000** sont relevés en continu, sur une même ligne de temps, et une page web locale montre le direct, l'historique et les alertes. On relie ainsi une coupure ou une dégradation d'un décodeur à ce qui se passait côté RF, et on compare les IRD qui reçoivent la même porteuse.
 
 - **Lecture seule** : l'outil ne change aucun réglage des appareils.
-- **Rien à installer** : Python 3.8+ (bibliothèque standard uniquement), ou un exécutable Windows autonome.
+- **Rien à installer** : un exécutable Windows autonome, ou Python 3.11+ (bibliothèque standard uniquement ; Python 3.8 à 3.10 demandent en plus le module `tomli` : `python -m pip install tomli`).
 - **Alertes** : perte de lock, chute ou marge basse, BER, image perdue, son absent, programme non déchiffré, flux arrêté, défaut matériel, IRD seul en défaut sur sa porteuse, chute du niveau RF, remontée du bruit, appareil injoignable.
 
 ## Lancer
@@ -26,7 +26,7 @@ puis **http://localhost:8091**.
 
 ## La page
 
-- **Vue d'ensemble** : chiffres clés, une carte par IRD (état, cause et durée d'un défaut, marge, signal reçu, température, marge des 10 dernières minutes), événements en cours, plancher de bruit.
+- **Vue d'ensemble** : chiffres clés, une tuile par IRD (état, cause et durée d'un défaut, marge en grand avec sa courbe des 10 dernières minutes, image décodée ; le reste au clic), jusqu'à 9 IRD sans défilement, événements en cours, plancher de bruit.
 - **Une page par porteuse** : période au choix (Direct, 1 h, 24 h, 7 j, dates libres, ou glisser sur un graphe) ; marge, puissance d'entrée, niveau RF et bande « État » de tous ses IRD sur le même axe ; détails ou résumé de chaque IRD ; ses événements.
 - **Journal** des événements, filtrable ; un clic ouvre la porteuse au moment de l'événement.
 - **Analyseur FSH4** : état, réglages lus, marqueurs et plancher de bruit, pause pour rendre la main sur l'appareil.
@@ -43,7 +43,7 @@ Tout le détail (alertes et leurs seuils, marqueurs, réglages, données, API) :
 
 ## Exécutable Windows
 
-Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`). Un second job, `windows7`, fait de même en Python 3.8 32 bits pour Windows 7 SP1 : archive `MonitoringSat-Windows7`.
+Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`). Un second job, `windows7`, fait de même en Python 3.8 32 bits pour Windows 7 SP1 : archive `MonitoringSat-Windows7`. Sur un tag `v*`, un job `release` publie les deux archives ensemble, une fois les deux fabriquées et essayées (seul job autorisé à écrire dans le dépôt ; actions figées sur un commit).
 
 - **À la main** : onglet **Actions** → « Exécutable Windows » → **Run workflow** ; l'archive est dans la rubrique **Artifacts** de l'exécution (90 jours).
 - **Version publiée** : pousser un tag `v…` (par exemple `v1.0.0`) ; l'archive est jointe à la **Release**.
@@ -57,7 +57,7 @@ python3 -m unittest discover tests
 node --test "web/tests/*.test.js"
 ```
 
-307 tests Python et 26 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
+366 tests Python et 44 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
 
 ## Documentation
 

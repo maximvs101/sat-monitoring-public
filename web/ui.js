@@ -38,7 +38,7 @@ function pageHead(title, { meta = "", crumb = null, actions = [] } = {}) {
 // État du direct pour l'en-tête des pages : l'heure n'avance que si le flux en direct est ouvert.
 function liveStatus() {
   const s = Store.state;
-  if (s.connected) return `en direct · ${fmtDateTime(Date.now())}`;
+  if (s.connected) return `en direct · ${fmtDateTime(Store.now())}`;
   const last = Math.max(0, ...Object.values(s.seen).filter(Boolean));
   return `connexion perdue${last ? ` · dernière mesure ${fmtDateTime(last)}` : ""}`;
 }
@@ -85,12 +85,12 @@ async function eventDestination(ev) {
   let carriers = Store.state.carriers;
   if (ev.source?.startsWith("ird:")) {
     try {
-      carriers = (await Store.loadRange(ev.ts_start - pad, (ev.ts_end ?? Date.now()) + pad, 50)).carriers;
+      carriers = (await Store.loadRange(ev.ts_start - pad, (ev.ts_end ?? Store.now()) + pad, 50)).carriers;
     } catch (e) {
       return { message: `Chargement impossible : ${e.message}` };
     }
   }
-  const target = eventTarget(ev, carriers, Date.now(), pad);
+  const target = eventTarget(ev, carriers, Store.now(), pad);
   return target ? { target } : { message: `${eventSource(ev)} n'appartenait à aucune porteuse à ce moment-là : pas de page à ouvrir.` };
 }
 

@@ -117,11 +117,21 @@ const SettingsPage = (() => {
     return [el("h3", { textContent: title }), el("ul", { className: "found-list" }, ...(rows.length ? rows : [el("li", { className: "muted", textContent: "Aucun trouvé." })]))];
   }
 
-  async function scan(btn, info, found, err) {
+  // ask : demander d'abord confirmation, en nommant les réseaux qui seront parcourus (toutes leurs adresses reçoivent
+  // une requête de lecture ; sur un poste d'entreprise, VPN compris).
+  async function scan(btn, info, found, err, ask = true) {
     btn.disabled = true;
     showError(err, "");
-    info.textContent = "Recherche en cours…";
     try {
+      if (ask) {
+        const { networks } = await Store.getJSON("/api/networks");
+        const list = networks.join(", ") || "aucun";
+        if (!confirm(`La recherche interroge toutes les adresses de : ${list}.\n\nElle n'envoie que des requêtes de lecture (*IDN? et l'état des IRD). Continuer ?`)) {
+          btn.disabled = false;
+          return;
+        }
+      }
+      info.textContent = "Recherche en cours…";
       const [r, d] = await Promise.all([Store.post("/api/discover"), Store.getJSON("/api/devices")]);
       if (!dom) return;
       const known = new Set(d.irds.map((i) => i.serial));
@@ -135,7 +145,7 @@ const SettingsPage = (() => {
         }),
         ...foundList("IRD Ateme", r.ird,
           (i) => [`${i.name || "Sans nom"} (${i.model}) — ${i.host}`, `${i.input} · n° ${i.serial}`, known.has(i.serial) ? "" : "Ajouter"],
-          (i) => act(() => Store.post("/api/irds", { host: i.host }), err).then(() => scan(btn, info, found, err))),
+          (i) => act(() => Store.post("/api/irds", { host: i.host }), err).then(() => scan(btn, info, found, err, false))),
       );
     } catch (e) {
       showError(err, `Recherche impossible : ${e.message}`);

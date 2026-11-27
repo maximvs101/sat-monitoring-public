@@ -7,6 +7,8 @@ toutes les 60 s pendant 6 s (et le note dans son journal).
 
 import math
 import random
+import shutil
+import signal
 import sys
 import tempfile
 import time
@@ -64,6 +66,8 @@ def ird_logs(serial: str) -> list:
 
 def factory(entry, cfg):
     def identify():
+        if entry.host not in DEVICES:
+            raise IrdError("IRD injoignable (démonstration : aucun appareil à cette adresse)")
         return DEVICES[entry.host]
 
     last_extras = [0.0]
@@ -104,11 +108,17 @@ def main():
     save_irds(cfg_path, tuple(IrdEntry(s, n, h) for h, (s, n) in DEVICES.items()))
     cfg = load_config(cfg_path)
     cfg = replace(cfg, server=ServerConfig(port=port), paths=PathsConfig(db=str(tmp / "demo.db"), log_dir=str(tmp)))
+    # Le FSH4 simulé reste simulé quand on change son adresse ou sa polarisation : la démo ne touche jamais le réseau.
     app = App(cfg, fsh_read=fsh_read, fsh_close=lambda: None, ird_factory=factory, config_path=cfg_path,
-              scanner=lambda: {"networks": ["10.0.0.0/24"], "fsh": [], "ird": []})
+              scanner=lambda: {"networks": ["10.0.0.0/24"], "fsh": [], "ird": []},
+              fsh_factory=lambda cfg: (fsh_read, lambda: None), networks=lambda: ["10.0.0.0/24"])
     httpd = make_server(app)
     app.start()
     print(f"Démonstration sur http://127.0.0.1:{port} (base {tmp})", flush=True)
+
+    def stop(*_):
+        raise KeyboardInterrupt  # arrêt demandé par le système : même nettoyage que Ctrl+C
+    signal.signal(signal.SIGTERM, stop)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -116,6 +126,7 @@ def main():
     finally:
         httpd.server_close()
         app.stop()
+        shutil.rmtree(tmp, ignore_errors=True)  # base et configuration de la démo effacées à l'arrêt
 
 
 if __name__ == "__main__":

@@ -27,18 +27,36 @@ function parseRoute(hash) {
   const parts = path.split("/").filter(Boolean);
   let route;
   if (!parts.length) route = { page: "overview" };
-  else if (parts[0] === "porteuse" && parts.length === 2) route = { page: "carrier", key: decodeURIComponent(parts[1]) };
+  else if (parts[0] === "porteuse" && parts.length === 2) {
+    const key = safeDecode(parts[1]);
+    route = key == null ? { page: "notfound" } : { page: "carrier", key };
+  }
   else if ((parts[0] === "journal" || parts[0] === "fsh4") && parts.length === 1) route = { page: PAGES[parts[0]] };
   else if (parts[0] === "reglages" && parts.length <= 2) {
     const tab = parts[1] || "appareils";
     route = SETTINGS_TABS.includes(tab) ? { page: "settings", tab } : { page: "notfound" };
   } else route = { page: "notfound" };
   if (q >= 0 && route.page !== "notfound") {
-    for (const [name, value] of new URLSearchParams(raw.slice(q + 1))) {
-      if (QUERY_KEYS[name] && value) route[QUERY_KEYS[name]] = value;
+    let params = [];
+    try {
+      params = [...new URLSearchParams(raw.slice(q + 1))];
+    } catch {
+      // paramètres illisibles : ignorés
+    }
+    for (const [name, value] of params) {
+      if (QUERY_KEYS[name] && value && !value.includes("\uFFFD")) route[QUERY_KEYS[name]] = value;
     }
   }
   return route;
+}
+
+// Partie d'adresse décodée ; null si elle est mal encodée (« %E0 » tapé ou collé à la main).
+function safeDecode(part) {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return null;
+  }
 }
 
 function routeHref(route) {
@@ -56,8 +74,14 @@ function isFixedPeriod(period) {
   return typeof period === "string" && Object.hasOwn(FIXED_PERIODS, period);
 }
 
+// Période personnalisée valable : début avant la fin. Inversée, c'est le direct (comme une période inconnue).
+function customRange(period) {
+  const m = CUSTOM_PERIOD.exec(period || "");
+  return m && Number(m[1]) < Number(m[2]) ? [Number(m[1]), Number(m[2])] : null;
+}
+
 function isLive(period) {
-  return !period || period === "live" || !(isFixedPeriod(period) || CUSTOM_PERIOD.test(period));
+  return !period || period === "live" || !(isFixedPeriod(period) || customRange(period));
 }
 
 function periodRange(period, now, liveMin) {
@@ -194,6 +218,20 @@ function reallyEnded(ev) {
   return ev.ts_end != null && !(ev.detail || "").endsWith(STOPPED_REASON);
 }
 
+// Acquittements à garder (clés « appareil|type ») d'après les alertes connues de la page : tant qu'une alerte de ce
+// type est ouverte, ou que la plus récente n'a été fermée que par l'arrêt du service (elle va se rouvrir). Sinon la
+// panne s'est vraiment terminée — sous les yeux de la page ou pendant qu'elle était fermée — et la suivante sonnera.
+function keptAcks(ackedKeys, events) {
+  const latest = new Map(), open = new Set();
+  for (const ev of events) {
+    const key = alertKey(ev);
+    if (!ackedKeys.has(key)) continue;
+    if (ev.ts_end == null) open.add(key);
+    if (!latest.has(key) || ev.ts_start > latest.get(key).ts_start) latest.set(key, ev);
+  }
+  return new Set([...ackedKeys].filter((key) => open.has(key) || (latest.has(key) && !reallyEnded(latest.get(key)))));
+}
+
 // Son d'une alerte qui vient de s'ouvrir : `ackedKeys` (alertes acquittées, par appareil et type, pas encore vues se
 // terminer vraiment), `muted` ({ source: fin du silence en ms }), `now`. Pas d'alarme pour un appareil en silence
 // (intervention), ni pour une alerte acquittée que le service, redémarré, rouvre (même panne).
@@ -300,5 +338,5 @@ function repeatDue(r, now, prefs) {
 
 if (typeof module !== "undefined") {
   module.exports = { num, fmt, fmtBer, parseRoute, routeHref, isFixedPeriod, isLive, periodRange, periodLabel, carrierKeyRef,
-    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, alarmFor, repeatDue, thumbView, alignSeries, spreadLabels, tileGrid, marginTone };
+    matchCarrier, periodSummary, irdStatus, eventTarget, alertSound, alertKey, reallyEnded, keptAcks, alarmFor, repeatDue, thumbView, alignSeries, spreadLabels, tileGrid, marginTone };
 }

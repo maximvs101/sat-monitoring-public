@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import logging
 import socket
 import time
@@ -20,6 +21,7 @@ STATUS_BODY = b'xml=<status type="status"/>'
 LOGS_BODY = b'xml=<logs type="logs"/>'
 EXTRAS_TIMEOUT_S = 1.0  # état matériel et journal : requêtes annexes, courtes
 THUMB_EVERY_S = 2.5  # aperçu de l'image décodée : l'IRD le régénère toutes les 2 à 3 s
+XML_MAX_BYTES = 2_000_000  # une réponse refresh fait ~35 ko : au-delà, ce n'est pas un IRD qui répond
 THUMB_MAX_BYTES = 200_000  # un aperçu 320×180 fait ~13 ko : au-delà, ce n'est pas un aperçu
 ACTIVE_SAT = "presets/v1[@id='0']/channel/input/sat"  # configuration d'entrée satellite active
 BER_SCALE = 1e8  # l'IRD donne le BER × 1e8 (son interface affiche ber / 1e8, et « < 1e-8 » pour 0)
@@ -119,6 +121,7 @@ class IrdReading:
     health: IrdHealth | None = None  # toutes les 10 s seulement
     logs: list | None = None         # idem
     thumb: bytes | None = None       # aperçu JPEG de l'image décodée, toutes les 2,5 s seulement
+    measured_at: float | None = None  # heure (time.time) de la mesure de réception, avant les requêtes annexes
 
 
 def band_state(s: IrdSample) -> int:
@@ -195,9 +198,41 @@ def _parse_details(root, prog, decoding=True) -> IrdDetails | None:
     return IrdDetails(**d)
 
 
+def url_host(host: str) -> str:
+    """Adresse dans une URL : une adresse IPv6 s'écrit entre crochets."""
+    try:
+        return f"[{host}]" if ipaddress.ip_address(host).version == 6 else host
+    except ValueError:  # nom, adresse IPv4, ou « adresse:port »
+        return host
+
+
+def read_bounded(resp, max_bytes: int, timeout_s: float, what: str) -> bytes:
+    """Lit une réponse HTTP d'au plus max_bytes en au plus timeout_s : le délai du socket vaut pour chaque morceau, un
+    appareil qui répond au compte-gouttes ou sans fin ne retient pas la lecture ni ne fait grossir la mémoire."""
+    deadline = time.monotonic() + timeout_s
+    data = b""
+    while len(data) <= max_bytes:
+        chunk = resp.read1(max_bytes + 1 - len(data))
+        if not chunk:
+            return data
+        data += chunk
+        if time.monotonic() > deadline:
+            raise IrdError(f"{what} : réponse trop lente")
+    raise IrdError(f"{what} : réponse trop grande")
+
+
+def safe_xml(data: bytes):
+    """Analyse XML sans déclaration de type ni entités (l'expat de Python 3.8, celui de l'exécutable Windows 7, ne se
+    protège pas des entités imbriquées) : un IRD n'en envoie jamais."""
+    head = data[:4096].upper()
+    if b"<!DOCTYPE" in head or b"<!ENTITY" in data.upper():
+        raise ET.ParseError("déclaration de type ou entités refusées")
+    return ET.fromstring(data)
+
+
 def _parse_xml(data: bytes):
     try:
-        return ET.fromstring(data)
+        return safe_xml(data)
     except ET.ParseError as e:
         raise IrdError(f"réponse XML invalide : {e}") from e
 
@@ -343,15 +378,16 @@ class IrdClient:
     def __init__(self, host: str, cfg: IrdConfig):
         self.host = host
         self.cfg = cfg
-        self.url = f"http://{host}/xml-rpc"
+        self.url = f"http://{url_host(host)}/xml-rpc"
 
     def _post(self, body: bytes, timeout_s: float | None = None) -> bytes:
+        timeout_s = timeout_s or self.cfg.timeout_s
         try:
-            with open_url(xml_request(self.url, body), timeout=timeout_s or self.cfg.timeout_s) as resp:
+            with open_url(xml_request(self.url, body), timeout=timeout_s) as resp:
                 if resp.status != 200:
                     raise IrdError(f"HTTP {resp.status}")
                 try:
-                    return resp.read()
+                    return read_bounded(resp, XML_MAX_BYTES, timeout_s, "IRD")
                 except (TimeoutError, socket.timeout) as e:  # il a répondu, mais pas tout envoyé à temps (socket.timeout : Python < 3.10)
                     raise IrdError("IRD : réponse trop lente (délai dépassé pendant la lecture)") from e
         except urllib.error.HTTPError as e:
@@ -377,22 +413,13 @@ class IrdClient:
 
     def thumbnail(self) -> bytes:
         """Aperçu JPEG de l'image décodée, celui du « Decoding preview » de l'interface (simple lecture)."""
-        url = f"http://{self.host}/thumbnail.jpg?forceRefresh={int(time.time() * 1000)}"
-        # Le délai du socket vaut pour chaque morceau : la requête entière est bornée à part, pour ne jamais retenir
-        # la lecture de l'IRD plus d'une seconde.
-        deadline = time.monotonic() + EXTRAS_TIMEOUT_S
+        url = f"http://{url_host(self.host)}/thumbnail.jpg?forceRefresh={int(time.time() * 1000)}"
+        # Requête entière bornée (read_bounded), pour ne jamais retenir la lecture de l'IRD plus d'une seconde.
         try:
             with open_url(urllib.request.Request(url), timeout=EXTRAS_TIMEOUT_S) as resp:
                 if resp.status != 200:
                     raise IrdError(f"aperçu : HTTP {resp.status}")
-                data = b""
-                while len(data) <= THUMB_MAX_BYTES:
-                    chunk = resp.read1(THUMB_MAX_BYTES + 1 - len(data))
-                    if not chunk:
-                        break
-                    data += chunk
-                    if time.monotonic() > deadline:
-                        raise IrdError("aperçu : réponse trop lente")
+                data = read_bounded(resp, THUMB_MAX_BYTES, EXTRAS_TIMEOUT_S, "aperçu")
         except urllib.error.HTTPError as e:
             if e.code == 503:
                 raise IrdBusy("IRD occupé (HTTP 503)") from e
@@ -401,8 +428,6 @@ class IrdClient:
             raise IrdError(f"aperçu injoignable : {e}") from e
         except http.client.HTTPException as e:
             raise IrdError(f"aperçu : réponse HTTP invalide ({type(e).__name__})") from e
-        if len(data) > THUMB_MAX_BYTES:
-            raise IrdError("aperçu : image trop grande")
         # Début et fin de JPEG : une image coupée en route ne s'affiche pas à moitié. La fin est cherchée, pas exigée en
         # dernier : des octets peuvent suivre le marqueur de fin.
         if not data.startswith(b"\xff\xd8") or b"\xff\xd9" not in data[2:]:
@@ -448,6 +473,7 @@ class IrdReader:
                     raise IrdError(f"autre appareil à cette adresse (n° {serial})")
                 self._verified = True
             sample = self.client.fetch()
+            measured_at = time.time()  # avant les requêtes annexes : l'heure de la mesure, pas celle de leur fin
         except IrdBusy:
             raise
         except Exception:
@@ -459,6 +485,7 @@ class IrdReader:
             self._thumb_at = now
             thumb = self._extra("aperçu", self.client.thumbnail)
         if self._extras_at is not None and now - self._extras_at < self.extras_every_s:
-            return IrdReading(sample, None, None, thumb)
+            return IrdReading(sample, None, None, thumb, measured_at)
         self._extras_at = now
-        return IrdReading(sample, self._extra("état", self.client.health), self._extra("journal", self.client.logs), thumb)
+        return IrdReading(sample, self._extra("état", self.client.health), self._extra("journal", self.client.logs), thumb,
+                          measured_at)

@@ -574,6 +574,35 @@ class DetectTest(unittest.TestCase):
         self.assertTrue(all(e["detail"].endswith("— IRD injoignable") for e in changed if e["ts_end"]))
         self.assertEqual(self.open_kinds(), ["device_down"])
 
+    def test_log_still_active_reopens_after_down(self):
+        # Fermé par « IRD injoignable », un message toujours actif au retour se rouvre (le guide le promet).
+        self.det.on_logs(1000, "A", [])
+        self.det.on_logs(2000, "A", [self.msg(600, "Alarme", "error")])
+        self.det.on_state(3000, "ird:A", "down", "délai")
+        self.assertEqual(self.open_kinds(), ["device_down"])
+        self.det.on_state(6000, "ird:A", "up", "")
+        changed = self.det.on_logs(7000, "A", [self.msg(600, "Alarme", "error")])
+        self.assertEqual([(e["kind"], e["ts_end"]) for e in changed], [("ird_log", None)])
+        self.assertEqual(self.det.on_logs(8000, "A", [self.msg(600, "Alarme", "error")]), [])  # une seule fois
+
+    def test_log_ended_meanwhile_not_reopened_after_down(self):
+        self.det.on_logs(1000, "A", [])
+        self.det.on_logs(2000, "A", [self.msg(600, "Alarme", "error")])
+        self.det.on_state(3000, "ird:A", "down", "délai")
+        self.det.on_state(6000, "ird:A", "up", "")
+        self.assertEqual(self.det.on_logs(7000, "A", [self.msg(600, "Alarme", "error", ended=True)]), [])
+
+    def test_margin_drop_reopens_after_short_down(self):
+        self.feed(ird(8.0), 60)
+        self.feed(ird(4.0), 4)
+        self.assertEqual(self.kinds(open_only=True), ["margin_drop"])
+        self.t += 1000
+        self.det.on_state(self.t, "ird:A", "down", "délai")
+        self.t += 3000
+        self.det.on_state(self.t, "ird:A", "up", "")
+        self.feed(ird(4.0), 4)  # marge toujours basse au retour
+        self.assertIn("margin_drop", self.kinds(open_only=True))
+
     def test_remove_closes_new_alerts(self):
         self.run_ird(5, descrambled=False)
         self.det.on_logs(self.t, "A", [])

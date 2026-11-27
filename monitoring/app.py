@@ -21,6 +21,7 @@ from .store import Store
 log = logging.getLogger("monitoring")
 
 QUEUE_SIZE = 1000
+MAX_SUBSCRIBERS = 32  # pages ouvertes sur le direct ; au-delà, 503 (exécutable 32 bits : fils limités)
 UNCHANGED = object()  # « paramètre non fourni », distinct de None (= polarisation automatique)
 PURGE_EVERY_S = 3600
 ALIVE_EVERY_S = 30  # marque de vie : après un arrêt brutal, les alertes en cours sont fermées à cette heure au plus tôt
@@ -33,9 +34,12 @@ class LiveBus:
         self._subs = set()
         self._lock = threading.Lock()
 
-    def subscribe(self) -> queue.Queue:
+    def subscribe(self) -> queue.Queue | None:
+        """None au-delà de MAX_SUBSCRIBERS pages ouvertes : chacune garde un fil et une file pour toujours."""
         q = queue.Queue(QUEUE_SIZE)
         with self._lock:
+            if len(self._subs) >= MAX_SUBSCRIBERS:
+                return None
             self._subs.add(q)
         return q
 
@@ -81,8 +85,8 @@ def describe_settings(settings) -> str:
 
 
 def default_fsh(cfg: Config):
-    client = FshClient(cfg.fsh)
-    return FshReader(client).read, client.close
+    reader = FshReader(FshClient(cfg.fsh))
+    return reader.read, reader.close
 
 
 def default_ird_factory(entry: IrdEntry, cfg: Config):
@@ -106,13 +110,20 @@ def carrier_view(c: Carrier, mm, freqs: dict) -> dict:
     return {**carrier_dict(c), "markers": list(mm.by_carrier.get(c.key, ())), "center_marker": center_marker(c, mm, freqs)}
 
 
+class ScanBusy(Exception):
+    """Une recherche sur le réseau est déjà en cours."""
+
+
 class App:
     def __init__(self, cfg: Config, fsh_read=None, fsh_close=None, ird_factory=None, web_dir: Path | None = None,
-                 config_path: Path | None = None, scanner=None):
+                 config_path: Path | None = None, scanner=None, fsh_factory=None, networks=None):
         self.cfg = cfg
         self.config_path = config_path
         self.ird_factory = ird_factory or default_ird_factory
         self.scanner = scanner or discover.scan
+        self.networks = networks or (lambda: [str(n) for n in discover.local_networks()])  # parcourus par la recherche
+        self.fsh_factory = fsh_factory or default_fsh  # (lecture, fermeture) du FSH4 d'une configuration
+        self._scan_lock = threading.Lock()
         self.web_dir = (web_dir or system.web_dir()).resolve()
         self.store = Store(cfg.paths.db)
         self.detector = Detector(self.store, cfg.detect)
@@ -190,7 +201,7 @@ class App:
     def identify_pending(self) -> None:
         """Identifie les IRD de l'ancien format (sans numéro de série) ; ceux qui échouent restent en attente."""
         with self._devices_lock:
-            still, changed = [], False
+            still, new, changed = [], [], False
             for entry in self.pending:
                 try:
                     serial, name = self.ird_factory(entry, self.cfg)[1]()
@@ -199,14 +210,22 @@ class App:
                     still.append(entry)
                     continue
                 changed = True
-                if serial in self.ird_loops:
+                if serial in self.ird_loops or any(e.serial == serial for e in new):
                     log.info("IRD %s déjà suivi (n° %s) : entrée en double ignorée", entry.host, serial)
                     continue
-                self._register(IrdEntry(serial, entry.name if entry.name not in ("", "IRD") else name or "IRD",
-                                        entry.host))
+                new.append(IrdEntry(serial, entry.name if entry.name not in ("", "IRD") else name or "IRD", entry.host))
+            if not changed:
+                return
+            # Enregistré d'abord : config.toml non inscriptible, rien ne change (nouvel essai au prochain passage).
+            followed = tuple(e for e in self._entries() if e.serial)
+            try:
+                self._save_irds((*followed, *new, *still))
+            except OSError as e:
+                log.warning("Identification des IRD non enregistrée (config.toml) : %s", e)
+                return
+            for entry in new:
+                self._register(entry)
             self.pending = still
-            if changed:
-                self._save_irds()
 
     def _identify_loop(self):
         while self.pending and not self._stopping.wait(self.cfg.detect.retry_s):
@@ -227,6 +246,10 @@ class App:
         with self._devices_lock:
             if serial not in self.ird_loops:
                 raise KeyError(serial)
+            # Enregistré d'abord : si config.toml ne peut pas être écrit, rien ne change en mémoire.
+            new = IrdEntry(serial, name or self.names[serial], host or self.hosts[serial],
+                           self.pols.get(serial) if polarization is UNCHANGED else polarization)
+            self._save_irds(tuple(new if e.serial == serial else e for e in self._entries()))
             if name:
                 self.names[serial] = name
                 self.detector.set_name(serial, name)
@@ -240,15 +263,16 @@ class App:
                 tuning = self.tunings.get(serial)
                 if tuning is not None:  # regroupement à jour sans attendre la prochaine lecture
                     self.tunings[serial] = replace(tuning, polarization=polarization or self.read_pols.get(serial))
-            self._save_irds()
         if polarization is not UNCHANGED:
             self._publish_carriers_if_changed(self.carriers())
 
     def remove_ird(self, serial: str) -> None:
         with self._devices_lock:
-            loop = self.ird_loops.pop(serial, None)
-            if loop is None:
+            if serial not in self.ird_loops:
                 raise KeyError(serial)
+            # Enregistré d'abord : si config.toml ne peut pas être écrit, l'IRD reste suivi.
+            self._save_irds(tuple(e for e in self._entries() if e.serial != serial))
+            loop = self.ird_loops.pop(serial)
             loop.stop()
             if loop.is_alive():
                 loop.join(5)
@@ -257,7 +281,6 @@ class App:
             with self._thumbs_lock:
                 self.thumbs.pop(serial, None)
             name = self.names.pop(serial, serial)
-            self._save_irds()
             with self._detect_lock:
                 events = self.detector.remove_ird(_now_ms(), serial)
         log.info("IRD retiré : %s (n° %s)", name, serial)
@@ -318,14 +341,15 @@ class App:
             self._save_carriers([e for e in self.cfg.carriers if not (e.manual and entry_matches(c, e))])
         self._publish_carriers_if_changed(self.carriers())
 
-    def _publish_carriers_if_changed(self, carriers: list) -> None:
+    def _publish_carriers_if_changed(self, carriers: list, force: bool = False) -> None:
+        """force : publiée même si porteuses et IRD n'ont pas changé (leurs marqueurs, eux, ont changé)."""
         with self._carriers_lock:
             # Un autre fil a calculé une liste plus récente : c'est elle qui sera publiée (la nôtre fermerait à tort
             # les alertes de ses nouvelles porteuses).
             if carriers is not self._last_carriers:
                 return
             sig = tuple((c.key, c.name, c.irds, c.manual) for c in carriers)
-            if sig == self._carriers_sig:
+            if sig == self._carriers_sig and not force:
                 return
             self._carriers_sig = sig
             with self._detect_lock:
@@ -358,8 +382,19 @@ class App:
             if self.config_path is not None:
                 save_fsh(self.config_path, host, port, polarization)
             was_absent = self.fsh_absent
+            same_device = (host, port) == (self.cfg.fsh.host, self.cfg.fsh.port)
             self.cfg = replace(self.cfg, fsh=replace(self.cfg.fsh, host=host, port=port, polarization=polarization))
-            fsh_read, fsh_close = default_fsh(self.cfg)
+            if same_device:
+                # Seule la polarisation de l'entrée change : même appareil, ses marqueurs sont rattachés de nouveau.
+                self.marker_map = attach_markers(self.carriers(), self.marker_freqs, polarization,
+                                                 self.cfg.detect.noise_markers)
+                log.info("FSH4 : entrée %s", polarization or "polarisation inconnue")
+                self._publish_carriers_if_changed(self.carriers(), force=True)
+                return
+            if not host:
+                # Plus de FSH4 : ses marqueurs ne sont plus rattachés aux porteuses.
+                self.marker_freqs, self.marker_map = {}, attach_markers([], {}, None)
+            fsh_read, fsh_close = self.fsh_factory(self.cfg)
             with self._detect_lock:
                 # Le changement est d'abord demandé : une lecture de l'ancien appareil qui se termine ensuite est
                 # reconnue (replacement_pending) et ignorée par la détection.
@@ -375,6 +410,7 @@ class App:
         else:
             log.info("FSH4 retiré : pas de FSH4 sur ce site")
         self._publish_events(events)
+        self._publish_carriers_if_changed(self.carriers(), force=True)
 
     # --- Mesures ---
 
@@ -457,11 +493,11 @@ class App:
         freqs = {n: m.freq_hz for n, m in reading.markers.items()}
         carriers = self.carriers()
         mm = attach_markers(carriers, freqs, self.cfg.fsh.polarization, self.cfg.detect.noise_markers)
-        self.marker_freqs, self.marker_map = freqs, mm
         events = []
         with self._detect_lock:
             if self.fsh_loop.replacement_pending():
                 return  # lecture de l'ancien FSH4, arrivée après le changement d'appareil
+            self.marker_freqs, self.marker_map = freqs, mm
             if reading.settings is not None:
                 key = reading.settings
                 if self._fsh_key is not None and key != self._fsh_key:
@@ -483,6 +519,9 @@ class App:
             # Lecture terminée après le retrait de l'IRD (un IRD injoignable met longtemps à échouer) : rien ne doit
             # renaître, ni état ni « injoignable » que plus rien ne fermerait.
             if device.startswith("ird:") and device[4:] not in self.ird_loops:
+                return
+            # État de l'ancien FSH4 (lecture terminée après un changement d'adresse) : pas celui du nouveau.
+            if device == "fsh" and self.fsh_loop.replacement_pending():
                 return
             log.info("%s : %s %s", device.upper(), state, detail)
             self.store.add_status(ts, device, state, detail)
@@ -554,6 +593,15 @@ class App:
                 log.exception("Échec de la purge")
             if self._stopping.wait(PURGE_EVERY_S):
                 return
+
+    def discover(self) -> dict:
+        """Recherche sur le réseau, une à la fois : chacune lance des dizaines de fils et interroge tout le réseau."""
+        if not self._scan_lock.acquire(blocking=False):
+            raise ScanBusy("recherche déjà en cours")
+        try:
+            return self.scanner()
+        finally:
+            self._scan_lock.release()
 
     def mark_alive(self) -> None:
         self.store.set_alive(_now_ms())

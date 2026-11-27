@@ -36,6 +36,15 @@ def make(read, clock, rec, timer=lambda: 0.0, **kw):
 
 
 class LoopTest(unittest.TestCase):
+    def test_reading_with_its_own_time(self):
+        # IRD : heure de la mesure de réception, pas le milieu de toute la lecture (requêtes annexes comprises).
+        class Reading:
+            measured_at = 10.05
+        rec = Recorder()
+        loop = make(lambda: Reading(), Clock(10.0, 13.0), rec)
+        loop.step()
+        self.assertEqual(rec.samples[0][0], 10050)
+
     def test_midpoint_timestamp(self):
         rec = Recorder()
         loop = make(lambda: "v", Clock(10.0, 10.2), rec)

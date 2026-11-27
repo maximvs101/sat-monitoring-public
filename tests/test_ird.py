@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 from monitoring.config import IrdConfig
-from monitoring.ird import (THUMB_MAX_BYTES, AudioVoice, IrdBusy, IrdClient, IrdError, IrdHealth, IrdLogMessage,
+from monitoring.ird import (THUMB_MAX_BYTES, XML_MAX_BYTES, AudioVoice, IrdBusy, IrdClient, IrdError, IrdHealth, IrdLogMessage,
                             IrdReader, IrdReading, IrdSample, band_state, parse_health, parse_logs, parse_refresh, parse_status)
 
 FIXTURE = (Path(__file__).parent / "fixtures" / "ird_refresh.xml").read_bytes()
@@ -149,6 +149,10 @@ class ClientTest(unittest.TestCase):
         self.assertEqual(body, b"xml=<refresh/>")
         self.assertEqual(ctype, "text/plain; charset=utf-8")
 
+    def test_ipv6_address_in_url(self):
+        self.assertEqual(IrdClient("fe80::1", IrdConfig()).url, "http://[fe80::1]/xml-rpc")
+        self.assertEqual(IrdClient("10.0.0.1", IrdConfig()).url, "http://10.0.0.1/xml-rpc")
+
     def test_thumbnail_returns_jpeg(self):
         srv = FakeIrd()
         self.addCleanup(srv.stop)
@@ -166,6 +170,21 @@ class ClientTest(unittest.TestCase):
         self.addCleanup(srv.stop)
         with self.assertRaises(IrdError):
             IrdClient(srv.host, IrdConfig()).thumbnail()
+
+    def test_refresh_oversized_refused(self):
+        # Un appareil (ou autre chose à son adresse) qui envoie des mégaoctets ne fait pas grossir la mémoire.
+        srv = FakeIrd(refresh=b"<a>" + b"x" * (XML_MAX_BYTES + 10) + b"</a>")
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).fetch()
+
+    def test_xml_entities_refused(self):
+        # « Billion laughs » : l'expat du Python 3.8 de l'exécutable Windows 7 ne s'en protège pas.
+        bomb = b'<?xml version="1.0"?><!DOCTYPE a [<!ENTITY x "xxxxxxxxxx"><!ENTITY y "&x;&x;&x;&x;">]><a>&y;</a>'
+        srv = FakeIrd(refresh=bomb)
+        self.addCleanup(srv.stop)
+        with self.assertRaises(IrdError):
+            IrdClient(srv.host, IrdConfig()).fetch()
 
     def test_thumbnail_rejects_empty(self):
         srv = FakeIrd(thumb=b"")
@@ -431,6 +450,13 @@ class ReaderTest(unittest.TestCase):
         r = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001").read()
         self.assertEqual(r.sample.program_number, 1)
         self.assertIsNone(r.thumb)
+
+    def test_reading_carries_measurement_time(self):
+        srv = FakeIrd(refresh=DECODE)
+        self.addCleanup(srv.stop)
+        before = time.time()
+        r = IrdReader(IrdClient(srv.host, IrdConfig()), "1000-00001").read()
+        self.assertTrue(before <= r.measured_at <= time.time())
 
     def test_reader_thumb_failure_keeps_sample(self):
         srv = FakeIrd(refresh=DECODE, thumb_status=500)

@@ -1,5 +1,5 @@
 @echo off
-rem Monitoring satellite FSH4 + IRD : double-cliquer pour lancer (Python 3.11 ou plus recent).
+rem Monitoring satellite FSH4 + IRD : double-cliquer pour lancer (Python 3.11 ou plus recent ; 3.8 a 3.10 avec le module tomli).
 rem La page s ouvre dans le navigateur ; fermer cette fenetre pour arreter.
 cd /d "%~dp0"
 echo Monitoring satellite - page : http://localhost:8080 (fermer cette fenetre pour arreter)

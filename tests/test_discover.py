@@ -9,6 +9,7 @@ from pathlib import Path
 
 from monitoring.discover import local_networks, parse_ifconfig, parse_ipconfig, probe_fsh, probe_ird, scan, scan_hosts
 from tests.fake_scpi import FakeScpi
+from tests.flood import Flood
 
 IFCONFIG = """lo0: flags=8049<UP,LOOPBACK,RUNNING,MULTICAST> mtu 16384
 \tinet 127.0.0.1 netmask 0xff000000
@@ -188,3 +189,13 @@ class DiscoverTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EndlessProbeTest(unittest.TestCase):
+    def test_probe_fsh_endless_answer_bounded(self):
+        import time
+        flood = Flood()
+        self.addCleanup(flood.stop)
+        t0 = time.monotonic()
+        self.assertIsNone(probe_fsh("127.0.0.1", flood.port, timeout_s=0.3))
+        self.assertLess(time.monotonic() - t0, 2.5)

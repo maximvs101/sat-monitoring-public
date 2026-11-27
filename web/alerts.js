@@ -14,7 +14,7 @@ const Alerts = (() => {
   // ackedKeys : alertes acquittées (« appareil|type ») pas encore vues se terminer vraiment ; muted : { source: fin }
   let { ackedKeys, muted } = loadState();
   let audio = null;          // AudioContext, créé au premier son (les navigateurs exigent un clic avant de jouer)
-  let known = null;          // événements déjà vus (ceux du chargement ne sonnent pas)
+  let known = null;          // id → gravité des événements déjà vus (ceux du chargement ne sonnent pas)
   const ringing = new Map(); // id → { ev, since, next } : alarmes critiques non acquittées
   let banner = null;
   const rows = new Map();     // id → ligne du bandeau
@@ -59,7 +59,7 @@ const Alerts = (() => {
   function set(changes) {
     prefs = { ...prefs, ...changes };
     save();
-    if (!prefs.critical) ringing.clear();  // son coupé : le bandeau reste (avertissement visuel), seul le son se tait
+    // Alarme critique décochée : le bandeau reste (avertissement visuel), seul le son se tait ; recochée, il reprend.
     render();
   }
 
@@ -120,7 +120,7 @@ const Alerts = (() => {
       { body: `${eventSource(ev)} — ${ev.detail}`, tag: `evenement-${ev.id}` });
     n.onclick = () => {
       window.focus();
-      const target = eventTarget(ev, Store.state.carriers, Date.now(), Store.state.cfg.event_padding_s * 1000);
+      const target = eventTarget(ev, Store.state.carriers, Store.now(), Store.state.cfg.event_padding_s * 1000);
       if (target) location.hash = routeHref(target);
       n.close();
     };
@@ -151,23 +151,20 @@ const Alerts = (() => {
   }
 
   function onStore(kind) {
-    if (known === null) return;
+    if (known === null) {
+      if (Store.state.loaded) begin();  // premier chargement réussi (il avait échoué au démarrage de la page)
+      return;
+    }
     const now = Date.now();
     let alarm = false, beep = false;
-    // Alerte vraiment terminée (pas seulement fermée par l'arrêt du service) : son acquittement est oublié, une
-    // prochaine panne du même appareil sonnera.
-    const openKeys = new Set([...Store.state.events.values()].filter((e) => e.ts_end == null).map(alertKey));
-    let forgot = false;
+    // Panne vraiment terminée (pas seulement fermée par l'arrêt du service) : son acquittement est oublié, une
+    // prochaine panne du même appareil sonnera (keptAcks).
+    forgetEndedAcks();
     for (const ev of Store.state.events.values()) {
-      if (reallyEnded(ev) && ackedKeys.has(alertKey(ev)) && !openKeys.has(alertKey(ev))) {
-        ackedKeys.delete(alertKey(ev));
-        forgot = true;
-      }
-    }
-    if (forgot) saveState();
-    for (const ev of Store.state.events.values()) {
-      if (known.has(ev.id)) continue;
-      known.add(ev.id);
+      // Déjà vu, sauf un avertissement devenu critique (« IRD seul en défaut » qui s'aggrave) : il sonne alors.
+      const seen = known.get(ev.id);
+      if (seen !== undefined && !(seen !== "critical" && ev.severity === "critical" && ev.ts_end == null)) continue;
+      known.set(ev.id, ev.severity);
       const sound = alarmFor(ev, { prefs, ackedKeys, muted, now });
       if (sound === "alarm") {
         alarm = true;
@@ -184,7 +181,7 @@ const Alerts = (() => {
       else r.ev = ev;
     }
     // Répétition des alarmes non acquittées : un seul son par seconde, quel que soit leur nombre.
-    if (kind === "tick") {
+    if (kind === "tick" && prefs.critical) {
       for (const r of ringing.values()) {
         if (repeatDue(r, now, prefs)) {
           alarm = true;
@@ -250,13 +247,27 @@ const Alerts = (() => {
     return soundButton;
   }
 
+  function forgetEndedAcks() {
+    const kept = keptAcks(ackedKeys, Store.state.events.values());
+    if (kept.size === ackedKeys.size) return;
+    ackedKeys = kept;
+    saveState();
+  }
+
+  // Point de départ des alarmes, au premier chargement réussi : les alertes déjà en cours ne sonnent pas, et comptent
+  // comme acquittées (un redémarrage du service qui les rouvre ne doit pas déclencher l'alarme).
+  function begin() {
+    known = new Map([...Store.state.events.values()].map((ev) => [ev.id, ev.severity]));
+    for (const ev of Store.state.events.values()) if (ev.ts_end == null && ev.severity === "critical") ackedKeys.add(alertKey(ev));
+    // Acquittements d'une session précédente dont la panne s'est terminée page fermée : oubliés.
+    forgetEndedAcks();
+    saveState();
+  }
+
   function init(bannerEl) {
     banner = bannerEl;
-    known = new Set(Store.state.events.keys());
-    // Déjà en cours au chargement : elles ne sonnent pas, et comptent comme acquittées (un redémarrage du service
-    // qui les rouvre ne doit pas déclencher l'alarme).
-    for (const ev of Store.state.events.values()) if (ev.ts_end == null && ev.severity === "critical") ackedKeys.add(alertKey(ev));
-    saveState();
+    // Premier chargement en échec (service en cours de démarrage) : départ au premier chargement réussi.
+    if (Store.state.loaded) begin();
     // Le premier clic n'importe où dans la page débloque le son.
     document.addEventListener("pointerdown", unlock, { once: true });
     document.addEventListener("keydown", unlock, { once: true });

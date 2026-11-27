@@ -1,9 +1,9 @@
 # Configuration du monitoring satellite FSH4 + IRD.
 # Toute clé absente prend sa valeur par défaut.
-# Modèle : copié en config.toml au premier lancement. Les IRD s'ajoutent depuis la page (Appareils…).
+# Modèle : copié en config.toml au premier lancement. Les IRD s'ajoutent depuis la page (Réglages › Appareils).
 
 [fsh]
-host = ""                 # analyseur R&S FSH4 : à renseigner depuis la page (Appareils…)
+host = ""                 # analyseur R&S FSH4 : à renseigner dans la page (Réglages › Appareils) ; vide = pas de FSH4
 port = 5555               # SCPI texte
 rate_hz = 4.0             # lectures du marqueur par seconde
 timeout_s = 2.0           # délai maximal par requête
@@ -14,7 +14,7 @@ rate_hz = 1.0
 timeout_s = 3.0
 
 [detect]
-margin_min_db = 0.0        # marge minimale (« Marge basse ») ; 0 = désactivée, réglable depuis la page (Seuils…)
+margin_min_db = 0.0        # marge minimale (« Marge basse ») ; 0 = désactivée, réglable dans la page (Réglages › Seuils d'alerte)
 ber_threshold = 1e-6       # BER au-delà duquel on ouvre « ber_high »
 ber_clear_s = 5.0          # durée sous le seuil avant de fermer
 margin_drop_db = 2.0       # chute de marge sous la médiane

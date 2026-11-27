@@ -117,7 +117,7 @@ const FshPage = (() => {
     sigs.events = sig;
     const pad = Store.state.cfg.event_padding_s * 1000;
     dom.events.replaceChildren(events.length
-      ? eventList(events, { onClick: (ev) => go({ period: `${ev.ts_start - pad}-${(ev.ts_end ?? Date.now()) + pad}` }) })
+      ? eventList(events, { onClick: (ev) => go({ period: `${ev.ts_start - pad}-${(ev.ts_end ?? Store.now()) + pad}` }) })
       : emptyState("Aucun événement du FSH4 sur la période."));
   }
 
@@ -142,7 +142,7 @@ const FshPage = (() => {
 
   async function loadPast() {
     const mine = ++seq;
-    const [from, to] = periodRange(route.period, Date.now(), Store.state.cfg.live_window_min);
+    const [from, to] = periodRange(route.period, Store.now(), Store.state.cfg.live_window_min);
     dom.status.textContent = "chargement…";
     try {
       const past = await Store.loadRange(from, to, Math.max(500, Math.round((dom.allZone.clientWidth || 1000) * 1.5)));

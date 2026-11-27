@@ -8,12 +8,14 @@ import re
 import socket
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
 
-from .ird import REFRESH_BODY, STATUS_BODY, IrdError, open_url, parse_refresh, xml_request
+from .ird import (REFRESH_BODY, STATUS_BODY, XML_MAX_BYTES, IrdError, open_url, parse_refresh, read_bounded, safe_xml,
+                  url_host, xml_request)
 
 # ifconfig : Mac (masque hexadécimal), Linux net-tools (masque pointé), ancien Linux (« inet addr: … Mask: … »).
 INET = re.compile(r"inet (?:addr:)?(\d+\.\d+\.\d+\.\d+)\s.*?(?:netmask|Mask:)\s*(0x[0-9a-fA-F]+|\d+\.\d+\.\d+\.\d+)")
@@ -87,18 +89,25 @@ def _port_open(host: str, port: int, timeout_s: float) -> bool:
         return False
 
 
+IDN_MAX_BYTES = 1024  # réponse à *IDN? : une ligne courte
+
+
 def probe_fsh(host: str, port: int = 5555, timeout_s: float = 0.5) -> dict | None:
     """Demande *IDN? ; ne retient qu'un analyseur R&S de la famille FSH."""
     try:
         with socket.create_connection((host, port), timeout=timeout_s) as sock:
             sock.settimeout(timeout_s * 4)
             sock.sendall(b"*IDN?\n")
+            # Réponse bornée en taille et en durée : un service qui répond sans fin n'est pas un FSH.
+            deadline = time.monotonic() + timeout_s * 4
             buf = b""
             while not buf.endswith(b"\n"):
                 chunk = sock.recv(1024)
                 if not chunk:
                     break
                 buf += chunk
+                if len(buf) > IDN_MAX_BYTES or time.monotonic() > deadline:
+                    return None
     except OSError:
         return None
     parts = [p.strip() for p in buf.decode(errors="replace").split(",")]
@@ -109,11 +118,11 @@ def probe_fsh(host: str, port: int = 5555, timeout_s: float = 0.5) -> dict | Non
 
 def _post(url: str, body: bytes, timeout_s: float) -> bytes:
     with open_url(xml_request(url, body), timeout=timeout_s) as resp:
-        return resp.read()
+        return read_bounded(resp, XML_MAX_BYTES, timeout_s, "recherche")
 
 
 def _describe_input(data: bytes) -> str:
-    root = ET.fromstring(data)
+    root = safe_xml(data)
     kind = root.findtext("probe/input/type", "").strip()
     if kind != "sat":
         return f"entrée {kind or 'inconnue'}"
@@ -124,10 +133,10 @@ def _describe_input(data: bytes) -> str:
 
 def probe_ird(host: str, port: int = 80, timeout_s: float = 1.0) -> dict | None:
     """Reconnaît un IRD Ateme par sa requête status, puis décrit son entrée active."""
-    url = f"http://{host}/xml-rpc" if port == 80 else f"http://{host}:{port}/xml-rpc"
+    url = f"http://{url_host(host)}/xml-rpc" if port == 80 else f"http://{url_host(host)}:{port}/xml-rpc"
     try:
-        root = ET.fromstring(_post(url, STATUS_BODY, timeout_s))
-    except (urllib.error.URLError, OSError, ET.ParseError, http.client.HTTPException):  # port 80 qui ne parle pas HTTP
+        root = safe_xml(_post(url, STATUS_BODY, timeout_s))
+    except (urllib.error.URLError, OSError, ET.ParseError, http.client.HTTPException, IrdError):  # pas un IRD
         return None
     if root.findtext("system/vendorName", "").strip() != "Ateme":
         return None

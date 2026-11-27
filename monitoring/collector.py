@@ -100,7 +100,10 @@ class DeviceLoop(threading.Thread):
         except Exception as e:  # tout échec de lecture compte, sans arrêter la boucle
             error = e
         m1, t1 = self.timer(), self.clock()
-        ts = int((t0 + t1) / 2 * 1000)
+        # Heure de la mesure si la lecture la donne (IRD : la réception, avant les requêtes annexes), sinon le milieu
+        # de la lecture.
+        measured = getattr(value, "measured_at", None) if error is None else None
+        ts = int((measured if measured is not None else (t0 + t1) / 2) * 1000)
         wait = max(self.period_s - (m1 - m0), self.min_idle_s)
 
         if error is None:

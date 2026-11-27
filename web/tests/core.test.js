@@ -282,3 +282,29 @@ test("grille des tuiles : hauteur minimale, la page défile plutôt que de rogne
   assert.equal(g.tileH, 145);
   assert.equal(core.tileGrid(2, 736, 100).tileH, 145);
 });
+
+test("acquittements gardés : alerte ouverte, ou dernière fermée seulement par l'arrêt du service", () => {
+  const ev = (id, ts_start, ts_end, detail = "IRD 1 : démodulateur déverrouillé") =>
+    ({ id, source: "ird:A", kind: "lock_lost", ts_start, ts_end, detail });
+  const acks = new Set(["ird:A|lock_lost"]);
+  // Ouverte : gardé.
+  assert.deepEqual([...core.keptAcks(acks, [ev(1, 1000, null)])], ["ird:A|lock_lost"]);
+  // Panne terminée page fermée (ou hors de la fenêtre) : oublié, la suivante sonnera.
+  assert.deepEqual([...core.keptAcks(acks, [ev(1, 1000, 5000)])], []);
+  assert.deepEqual([...core.keptAcks(acks, [])], []);
+  // Occurrence précédente terminée, la plus récente fermée par l'arrêt du service : gardé (elle va se rouvrir).
+  const stopped = ev(2, 9000, 12_000, "IRD 1 : démodulateur déverrouillé — service arrêté");
+  assert.deepEqual([...core.keptAcks(acks, [ev(1, 1000, 5000), stopped])], ["ird:A|lock_lost"]);
+  // … puis rouverte par le service redémarré : toujours gardé.
+  assert.deepEqual([...core.keptAcks(acks, [ev(1, 1000, 5000), stopped, ev(3, 13_000, null)])], ["ird:A|lock_lost"]);
+});
+
+test("adresse mal encodée : page introuvable, pas d'erreur", () => {
+  assert.deepEqual(core.parseRoute("#/porteuse/%E0"), { page: "notfound" });
+  assert.deepEqual(core.parseRoute("#/journal?src=%E0"), { page: "journal" });
+});
+
+test("période personnalisée inversée : le direct, pas un faux direct figé", () => {
+  assert.equal(core.isLive("2000-1000"), true);
+  assert.equal(core.isLive("1000-2000"), false);
+});

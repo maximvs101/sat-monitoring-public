@@ -84,7 +84,7 @@ const JournalPage = (() => {
 
   async function load() {
     const mine = ++seq;
-    const [from, to] = periodRange(period(), Date.now(), Store.state.cfg.live_window_min);
+    const [from, to] = periodRange(period(), Store.now(), Store.state.cfg.live_window_min);
     try {
       const list = await Store.getJSON(`/api/events?from=${from}&to=${to}`);
       if (mine !== seq || !dom) return;
@@ -111,8 +111,12 @@ const JournalPage = (() => {
   function onStore(kind) {
     if (kind !== "event" && kind !== "reload") return;
     if (!isFixedPeriod(period())) return;
-    clearTimeout(refresh);
-    refresh = setTimeout(load, 1000);
+    // Au plus une fois par seconde, même sous un flot continu d'événements (sinon le délai repartirait sans fin).
+    if (refresh) return;
+    refresh = setTimeout(() => {
+      refresh = null;
+      load();
+    }, 1000);
   }
 
   function mount(view, r) {
@@ -139,6 +143,7 @@ const JournalPage = (() => {
   function unmount() {
     seq++;
     clearTimeout(refresh);
+    refresh = null;
     if (unsubscribe) unsubscribe();
     unsubscribe = null;
     dom = route = null;

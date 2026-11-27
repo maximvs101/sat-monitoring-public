@@ -18,7 +18,8 @@ const Store = (() => {
     fshInfo: {},            // FSH4 : adresse, port, polarisation, span, RBW
     latest: {},             // numéro de série → dernière mesure complète (décodage, état matériel, détails)
     irds: {},               // numéro de série → séries de la fenêtre du direct { ts, margin_db, locked, state, power_dbm }
-    fsh: { ts: [], nums: [], levels: {}, freqs: {} },  // marqueurs FSH4 de la fenêtre du direct
+    loaded: false,          // un premier chargement complet a réussi
+    fsh: { ts: [], nums: [], levels: {}, levelsMin: {}, levelsMax: {}, freqs: {}, on: null },  // marqueurs FSH4 du direct
     noise: [],              // marqueurs placés sur le plancher de bruit
     ifWarning: false,       // marqueurs en fréquence intermédiaire (décalage LNB non réglé sur le FSH4)
     events: new Map(),      // id → événement (fenêtre du direct, et tous ceux en cours)
@@ -46,11 +47,12 @@ const Store = (() => {
     return res.status === 204 ? null : res.json();
   }
 
-  async function post(url, body) {
+  // Toujours un corps JSON : le service refuse les POST sans (protection contre les formulaires d'autres pages).
+  async function post(url, body = {}) {
     const res = await fetch(url, {
       method: "POST",
-      headers: body === undefined ? {} : { "Content-Type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
     });
     const text = await res.text();
     let data = {};
@@ -59,12 +61,20 @@ const Store = (() => {
     return data;
   }
 
+  // Heure du service, estimée à chaque chargement : les mesures sont datées par lui, et le poste qui affiche la page
+  // (un autre PC) peut avancer ou retarder.
+  let clockOffset = 0;
+  function now() {
+    return Date.now() + clockOffset;
+  }
+
   function liveRange() {
-    const now = Date.now();
-    return [now - state.cfg.live_window_min * 60_000, now];
+    const t = now();
+    return [t - state.cfg.live_window_min * 60_000, t];
   }
 
   function applyStatus(st) {
+    if (st.now != null) clockOffset = st.now - Date.now();
     state.cfg = st.config;
     state.carriers = st.carriers;
     state.noise = st.marker_map.noise;
@@ -79,7 +89,8 @@ const Store = (() => {
       state.hosts[serial] = ird.host;
       state.states[`ird:${serial}`] = ird.state;
       state.details[`ird:${serial}`] = st.devices[`ird:${serial}`]?.detail || "";
-      if (ird.latest) {
+      // Instantané pris avant les séries : une mesure plus récente déjà reçue en direct n'est pas remplacée.
+      if (ird.latest && ird.latest.ts >= (state.latest[serial]?.ts ?? -Infinity)) {
         state.latest[serial] = ird.latest;
         state.seen[`ird:${serial}`] = ird.latest.ts;
       }
@@ -112,7 +123,9 @@ const Store = (() => {
         state_ms: s.state_ms || null };              // agrégée : temps passé dans chaque état, par intervalle
     }
     const aggregated = Object.values(data.fsh).some((s) => s.aggregated) || Object.values(data.irds).some((s) => s.aggregated);
-    return { fsh: { ts, nums, levels, levelsMin, levelsMax, freqs }, irds, aggregated };
+    // on : marqueurs allumés d'après le direct (fixé au premier message) ; nums garde aussi ceux éteints depuis peu,
+    // qui ont encore des mesures dans la fenêtre.
+    return { fsh: { ts, nums, levels, levelsMin, levelsMax, freqs, on: null }, irds, aggregated };
   }
 
   // Période passée : séries (agrégées selon `points`), porteuses de la période, événements. Ne touche pas au direct.
@@ -151,6 +164,7 @@ const Store = (() => {
         state.irds = converted.irds;
         Object.assign(state.names, series.names);
         state.events = new Map(events.map((e) => [e.id, e]));
+        state.loaded = true;
         // Reçu pendant le chargement : plus récent que l'instantané (alerte ouverte ou fermée entre-temps).
         for (const msg of buffered) {
           if (msg.type === "event") state.events.set(msg.id, msg);
@@ -185,7 +199,8 @@ const Store = (() => {
       while (n < ts.length && ts[n] < from) n++;
       if (n) for (const a of [ts, ...arrays]) a.splice(0, n);
     };
-    cut(state.fsh.ts, state.fsh.nums.map((k) => state.fsh.levels[k]));
+    const f = state.fsh;
+    cut(f.ts, f.nums.flatMap((k) => [f.levels[k], f.levelsMin[k], f.levelsMax[k]]));
     for (const d of Object.values(state.irds)) cut(d.ts, [d.margin_db, d.locked, d.state, d.power_dbm]);
     for (const [id, ev] of state.events) {
       if (ev.ts_end != null && ev.ts_end < from) state.events.delete(id);
@@ -197,13 +212,21 @@ const Store = (() => {
     if (msg.type === "markers" && msg.ts > last(state.fsh.ts)) {
       const f = state.fsh;
       const nums = Object.keys(msg.markers).map(Number).sort((a, b) => a - b);
-      const changed = nums.join() !== f.nums.join() || nums.some((n) => msg.markers[n].freq_hz !== f.freqs[n]);
+      if (f.on === null) f.on = nums;
+      // Comparé aux marqueurs allumés au chargement (et non à tous ceux de la fenêtre) : un marqueur éteint ne
+      // provoque qu'un rechargement, pas un à chaque mesure tant qu'il reste des points de lui dans la fenêtre.
+      const changed = nums.join() !== f.on.join() || nums.some((n) => !f.nums.includes(n) || msg.markers[n].freq_hz !== f.freqs[n]);
       if (changed && !pending) {
         reload();  // marqueur allumé, éteint ou déplacé : tout recharger
         return;
       }
       f.ts.push(msg.ts);
-      for (const n of f.nums) f.levels[n].push(msg.markers[n]?.level_dbm ?? null);
+      for (const n of f.nums) {
+        const level = msg.markers[n]?.level_dbm ?? null;
+        f.levels[n].push(level);
+        f.levelsMin[n].push(level);  // mesure brute : minimum et maximum de l'intervalle = la mesure
+        f.levelsMax[n].push(level);
+      }
     } else if (msg.type === "ird") {
       const d = state.irds[msg.serial];
       if (!d) {
@@ -248,8 +271,9 @@ const Store = (() => {
     source.onopen = () => {
       state.connected = true;
       notify("state");
-      // Après une coupure (service redémarré…), tout recharger : des événements ont pu être fermés entre-temps.
-      if (opened) reload();
+      // Après une coupure (service redémarré…), tout recharger : des événements ont pu être fermés entre-temps. De
+      // même si le premier chargement a échoué (page ouverte pendant le démarrage du service).
+      if (opened || !state.loaded) reload();
       opened = true;
     };
     source.onerror = () => {
@@ -281,5 +305,5 @@ const Store = (() => {
     return [...state.events.values()].filter((e) => e.ts_end == null && predicate(e));
   }
 
-  return { state, subscribe, start, reload, loadRange, liveRange, liveEvents, openEvents, getJSON, post, applyStatus };
+  return { state, subscribe, start, reload, loadRange, liveRange, liveEvents, openEvents, getJSON, post, applyStatus, now };
 })();

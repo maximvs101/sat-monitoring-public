@@ -152,6 +152,24 @@ class AppTest(unittest.TestCase):
         app.mark_alive()
         self.assertGreaterEqual(app.store.last_ts(), before)
 
+    def test_remove_ird_unchanged_when_config_not_writable(self):
+        # config.toml verrouillé (Windows) : l'erreur est remontée et rien ne change en mémoire.
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        with mock.patch("monitoring.app.save_irds", side_effect=PermissionError("verrouillé")):
+            with self.assertRaises(PermissionError):
+                app.remove_ird("S1")
+        self.assertIn("S1", app.ird_loops)
+        self.assertEqual(app.names["S1"], "IRD 1")
+        self.assertEqual(app.hosts["S1"], "10.0.0.1")
+
+    def test_update_ird_unchanged_when_config_not_writable(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        with mock.patch("monitoring.app.save_irds", side_effect=PermissionError("verrouillé")):
+            with self.assertRaises(PermissionError):
+                app.update_ird("S1", "Nouveau", "10.0.0.9", "horizontal")
+        self.assertEqual((app.names["S1"], app.hosts["S1"], app.pols["S1"]), ("IRD 1", "10.0.0.1", None))
+        self.assertEqual(app.detector.names.get("S1"), "IRD 1")
+
     def test_status_has_thumb_ts(self):
         app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))
         self.irds.thumbs["S1"] = b"\xff\xd8image1"
@@ -221,6 +239,35 @@ class AppTest(unittest.TestCase):
         app.identify_pending()
         self.assertEqual(list(app.ird_loops), ["S1"])
         self.assertEqual(load_config(self.cfg_path).irds, (IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+
+    def test_identification_survives_unwritable_config(self):
+        app = self.make((IrdEntry("", "IRD", "10.0.0.1"),))
+        with mock.patch("monitoring.app.save_irds", side_effect=PermissionError("verrouillé")):
+            app.identify_pending()  # pas d'exception : réessayé plus tard
+        self.assertEqual(len(app.pending), 1)
+
+    def test_fsh_polarization_only_is_not_a_device_change(self):
+        app = self.make()
+        app.set_fsh("10.0.0.9", 5555, "horizontal")
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["kind"] == "devices_changed"], [])
+        self.assertEqual(load_config(self.cfg_path).fsh.polarization, "horizontal")
+
+    def test_no_fsh_forgets_markers(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.reading = fsh({1: (12_583.0e6, -50.0), 4: (11_200e6, -67.0)})
+        self.step_irds(app)
+        app.fsh_loop.step()
+        self.assertEqual(app.status()["carriers"][0]["markers"], [1])
+        app.set_fsh("", 5555, None)
+        st = app.status()
+        self.assertEqual(st["carriers"][0]["markers"], [])
+        self.assertEqual(st["marker_map"]["noise"], [])
+
+    def test_old_fsh_state_ignored_after_change(self):
+        app = self.make()
+        app.set_fsh("10.0.0.8", 5555, None)  # changement demandé, pas encore appliqué par la boucle
+        app._on_state(5000, "fsh", "down", "FSH4 injoignable : ancien")
+        self.assertEqual([e for e in app.store.events(0, 10**13) if e["kind"] == "device_down"], [])
 
     def test_alone_alert_end_to_end(self):
         app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"), IrdEntry("S2", "IRD 2", "10.0.0.2")))

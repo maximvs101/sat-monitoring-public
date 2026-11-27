@@ -4,6 +4,7 @@ import unittest
 from monitoring.config import FshConfig
 from monitoring.fsh import FshClient, FshError, FshReader, FshSettings, MarkerSample
 from tests.fake_scpi import FakeScpi
+from tests.flood import Flood
 
 OK = {"CALC:MARK1:Y?": "-40.764",
       "FREQ:SPAN?": "50000000.000000", "BAND?": "300000.000000"}
@@ -118,6 +119,17 @@ class FshTest(unittest.TestCase):
         self.assertNotIn("CALC:MARK2:Y?", srv.received)
         self.assertNotIn("CALC:MARK2:X?", srv.received)
 
+    def test_reader_rereads_settings_after_close(self):
+        # Pause ou changement d'appareil (connexion fermée) : réglages relus à la reprise, même avant 10 s.
+        srv, c = self.make(MULTI)
+        now = [100.0]
+        reader = FshReader(c, settings_every_s=10.0, clock=lambda: now[0])
+        reader.read()
+        reader.close()
+        now[0] = 102.0
+        reader.read()
+        self.assertEqual(srv.received.count("BAND?"), 2)
+
     def test_reader_reads_settings_every_10s(self):
         srv, c = self.make(MULTI)
         now = [100.0]
@@ -164,3 +176,16 @@ class FshTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EndlessAnswerTest(unittest.TestCase):
+    def test_endless_answer_bounded(self):
+        # Réponse qui ne finit jamais sa ligne : abandon borné en taille et en durée, la boucle n'est pas bloquée.
+        flood = Flood()
+        self.addCleanup(flood.stop)
+        client = FshClient(FshConfig(host="127.0.0.1", port=flood.port, timeout_s=1.0))
+        self.addCleanup(client.close)
+        t0 = time.monotonic()
+        with self.assertRaises(FshError):
+            client.query("FREQ:SPAN?")
+        self.assertLess(time.monotonic() - t0, 3)

@@ -128,3 +128,75 @@ test("flux en direct fermé (réponse en erreur) : la page se reconnecte seule",
   timers[timers.length - 1].fn();
   assert.strictEqual(sources.length, 2);
 });
+
+// Service simulé : marqueurs 1 et 2 mesurés dans la fenêtre, mais le 2 vient d'être éteint (plus dans le direct).
+function fshService(calls) {
+  const now = Date.now();
+  const status = { now, config: { live_window_min: 10, max_points: 5000 }, carriers: [], marker_map: { noise: [], if_warning: false },
+    irds: {}, fsh: { state: "up" }, devices: {}, marker: { ts: now - 1000 }, markers: { 1: { ts: now - 1000 } } };
+  const series = { fsh: { 1: { ts: [now - 2000, now - 1000], freq_hz: [11e9, 11e9], level_dbm: [-50, -51] },
+                          2: { ts: [now - 2000, now - 1000], freq_hz: [12e9, 12e9], level_dbm: [-60, -61] } },
+    irds: {}, names: {}, carriers: [], noise: [], if_warning: false };
+  return async (url) => {
+    calls.push(url);
+    const body = url.startsWith("/api/status") ? status : url.startsWith("/api/series") ? series : [];
+    return { ok: true, status: 200, json: async () => JSON.parse(JSON.stringify(body)) };
+  };
+}
+
+test("marqueur FSH4 éteint : un seul rechargement, puis les mesures s'ajoutent (pas de boucle)", async () => {
+  const calls = [];
+  const { Store, sources } = loadStore(fshService(calls));
+  await Store.start();
+  const statusCalls = () => calls.filter((u) => u.startsWith("/api/status")).length;
+  const before = statusCalls();
+  for (let i = 0; i < 8; i++) {
+    sources[0].onmessage({ data: JSON.stringify({ type: "markers", ts: Date.now() + i, markers: { 1: { freq_hz: 11e9, level_dbm: -70 - i } } }) });
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.ok(statusCalls() - before <= 1, `${statusCalls() - before} rechargements`);
+  const f = Store.state.fsh;
+  assert.strictEqual(f.levels[1][f.levels[1].length - 1], -77);
+});
+
+test("page FSH4 en direct : minimum et maximum suivent les nouvelles mesures", async () => {
+  const calls = [];
+  const { Store, sources } = loadStore(fshService(calls));
+  await Store.start();
+  sources[0].onmessage({ data: JSON.stringify({ type: "markers", ts: Date.now() + 5, markers: { 1: { freq_hz: 11e9, level_dbm: -80 } } }) });
+  await new Promise((r) => setImmediate(r));
+  const f = Store.state.fsh;
+  assert.strictEqual(f.levelsMin[1].length, f.levels[1].length);
+  assert.strictEqual(f.levelsMin[1][f.levelsMin[1].length - 1], -80);
+  assert.strictEqual(f.levelsMax[1][f.levelsMax[1].length - 1], -80);
+});
+
+test("premier chargement en échec (service qui démarre) : rechargé dès que le direct s'ouvre", async () => {
+  const calls = [];
+  let up = false;
+  const service = fshService(calls);
+  const { Store, sources } = loadStore(async (url) => (up ? service(url) : (calls.push(url), { ok: false, status: 503 })));
+  await Store.start().catch(() => {});
+  assert.strictEqual(Store.state.loaded, false);
+  up = true;
+  sources[0].onopen();
+  await new Promise((r) => setTimeout(r, 0));
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(Store.state.loaded, true);
+});
+
+test("heure du service : un poste en avance ou en retard ne fausse ni la fenêtre du direct ni la fraîcheur", async () => {
+  const calls = [];
+  const service = fshService(calls);
+  const ahead = 60_000;  // le service a une minute d'avance sur ce poste
+  const { Store } = loadStore(async (url) => {
+    const res = await service(url);
+    if (!url.startsWith("/api/status")) return res;
+    const st = await res.json();
+    st.now += ahead;
+    return { ok: true, status: 200, json: async () => st };
+  });
+  await Store.start();
+  assert.ok(Math.abs(Store.now() - (Date.now() + ahead)) < 2000);
+  assert.ok(Math.abs(Store.liveRange()[1] - (Date.now() + ahead)) < 2000);
+});
