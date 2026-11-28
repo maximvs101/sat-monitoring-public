@@ -8,12 +8,12 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.6** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.6, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`). Dernier essai sur un PC Windows : la v1.2.3, le 24/10, avec succès (confirmé par Max) ; les versions suivantes n'y ont pas encore été essayées.
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.6** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.6, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`). Dernier essai sur un PC Windows : la v1.3.6, le 28/11, avec succès (confirmé par Max) ; la version Windows 7 n'a pas encore été essayée sur le vrai PC Windows 7.
 
 ## À faire
 
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
-- Essayer une version 1.3.x sur un PC Windows, et la version Windows 7 sur le vrai PC Windows 7.
+- Essayer la version Windows 7 sur le vrai PC Windows 7 (prévu plus tard).
 - Consultation depuis un autre PC (prévue, marche à suivre dans le guide) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
