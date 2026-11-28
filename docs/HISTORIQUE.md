@@ -8,7 +8,7 @@
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.5** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.5, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`). Dernier essai sur un PC Windows : la v1.2.3, le 24/10, avec succès (confirmé par Max) ; les versions suivantes n'y ont pas encore été essayées.
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.6** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.6, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`). Dernier essai sur un PC Windows : la v1.2.3, le 24/10, avec succès (confirmé par Max) ; les versions suivantes n'y ont pas encore été essayées.
 
 ## À faire
 
@@ -25,6 +25,7 @@
 
 ## 28 novembre 2026
 
+- **Version v1.3.6** publiée (corrections de la seconde vérification) : release https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.6, notes en français ; fabrications Windows et Windows 7 réussies, deux archives et `SHA256SUMS.txt`.
 - **Nouvelle vérification** (sous-agents, mêmes axes que le 27/11) puis corrections (branche `corrections-verif2`, à la demande de Max) :
   - **polarisation du FSH4** changée seule : les références de marge et de niveau repartent de zéro (« entrée du FSH4 changée »), sans fausse alerte ; une lecture de l'ancien FSH4 qui se termine après un changement n'est plus enregistrée ;
   - **XML** d'un appareil refusé s'il n'est pas en UTF-8 (une déclaration d'entités en UTF-16 passait le contrôle) ; entier géant dans une saisie refusé (400 au lieu de 500) ;
