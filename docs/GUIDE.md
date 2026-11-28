@@ -94,7 +94,7 @@ Changer un seuil ferme une « Marge basse » en cours (« seuil modifié ») ; e
 - **Pas de FSH4 sur le site** : laisser l'adresse vide (`host = ""` dans `[fsh]`). Le service ne le lit pas, n'ouvre aucune alerte « injoignable », la vue d'ensemble affiche « Analyseur FSH4 : aucun » et les pages de porteuse n'ont plus de graphe « Niveau RF » ; la puissance d'entrée des IRD tient lieu de niveau RF. Après un changement de FSH4, la « dernière mesure » de l'ancien n'est plus affichée.
 - **IRD** : tableau des IRD suivis (nom modifiable, adresse modifiable, **polarisation**, porteuse reçue, état), **Retirer** (son historique est conservé), champ **Ajouter un IRD** par son adresse.
 - **Polarisation d'un IRD** : en général le LNB est alimenté par un autre équipement (répartiteur, multiswitch…) et le réglage de polarisation de l'IRD ne veut rien dire. En *automatique*, l'outil ne le prend en compte que si l'IRD alimente lui-même le LNB ; sinon la polarisation est inconnue et la section de la porteuse affiche « Polarisation inconnue pour … : à renseigner dans Réglages › Appareils ». Choisir *verticale* ou *horizontale* une fois pour toutes : c'est ce qui sépare deux transpondeurs V et H de même fréquence.
-- **Rechercher sur le réseau** parcourt les réseaux auxquels la machine est branchée (lus avec `ifconfig` sur Mac et Linux, `ipconfig` sous Windows ; chaque réseau limité à 254 adresses) : **Utiliser** pour un FSH, **Ajouter** pour un IRD Ateme pas encore suivi. La recherche n'envoie que des requêtes de lecture : `*IDN?` sur le port 5555, et la requête d'état de l'interface web des IRD. La page nomme d'abord les réseaux qui seront parcourus et demande confirmation.
+- **Rechercher sur le réseau** parcourt les réseaux auxquels la machine est branchée (lus avec `ifconfig` sur Mac et Linux, `ip -4 -o addr` sur un Linux sans `ifconfig`, `ipconfig` sous Windows ; chaque réseau limité à 254 adresses) : **Utiliser** pour un FSH, **Ajouter** pour un IRD Ateme pas encore suivi. La recherche n'envoie que des requêtes de lecture : `*IDN?` sur le port 5555, et la requête d'état de l'interface web des IRD. La page nomme d'abord les réseaux qui seront parcourus et demande confirmation.
 
 Tout est appliqué sans redémarrer le service et enregistré dans `config.toml` (`[[irds]]`, `[[carriers]]`, `[fsh]`).
 
@@ -136,7 +136,7 @@ Le service ne fait que lire : il ne change aucun réglage du FSH4 ni des IRD. Le
 
 ## API
 
-Toutes les réponses sont en JSON ; horodatages en millisecondes.
+Réponses en JSON (erreurs comprises : `{"erreur": "…"}`), sauf l'image d'un IRD (JPEG), le flux direct (Server-Sent Events) et les réglages acceptés (204, sans corps) ; horodatages en millisecondes. Une route connue appelée avec une autre méthode répond 405, avec les méthodes acceptées dans l'en-tête `Allow`.
 
 | Requête | Rôle |
 | --- | --- |
@@ -152,6 +152,8 @@ Toutes les réponses sont en JSON ; horodatages en millisecondes.
 | `POST /api/detect` | seuils de marge : `margin_drop_db` (0,5 à 20), `margin_min_db` (0 à 30, 0 = désactivée) |
 | `GET /api/networks` | réseaux que la recherche parcourrait |
 | `POST /api/discover` | recherche réseau (une à la fois) |
+
+**Ouvrir la page à un autre PC** : dans `config.toml`, `[server]` → `host = "0.0.0.0"`, puis redémarrer le service ; la page s'ouvre alors depuis un autre poste à `http://<adresse de cette machine>:8080` (le pare-feu de la machine doit laisser passer le port). Par défaut (`127.0.0.1`), seule la machine du service y accède.
 
 Les `POST` (réglages, pause du FSH4, recherche) ne sont acceptés que depuis la machine du service, depuis la page elle-même (même origine) et avec un corps JSON : consultée depuis un autre poste, la page est en lecture seule. 32 pages au plus suivent le direct en même temps. Toute requête dont le nom d'hôte n'est ni `localhost` ni une adresse IP est refusée (protection contre le rattachement DNS : une page d'un autre site ne peut pas lire les données du service). Les fichiers de la page sont revalidés à chaque chargement (`Cache-Control: no-cache`) : après une mise à jour, le navigateur ne garde pas d'anciens scripts.
 

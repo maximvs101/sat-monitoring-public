@@ -224,8 +224,12 @@ def read_bounded(resp, max_bytes: int, timeout_s: float, what: str) -> bytes:
 def safe_xml(data: bytes):
     """Analyse XML sans déclaration de type ni entités (l'expat de Python 3.8, celui de l'exécutable Windows 7, ne se
     protège pas des entités imbriquées) : un IRD n'en envoie jamais."""
-    head = data[:4096].upper()
-    if b"<!DOCTYPE" in head or b"<!ENTITY" in data.upper():
+    try:
+        text = data.decode("utf-8")  # un IRD répond en UTF-8 ; UTF-16 ou autre codage cacherait les déclarations
+    except UnicodeDecodeError:
+        raise ET.ParseError("réponse XML qui n'est pas en UTF-8") from None
+    upper = text.upper()
+    if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
         raise ET.ParseError("déclaration de type ou entités refusées")
     return ET.fromstring(data)
 

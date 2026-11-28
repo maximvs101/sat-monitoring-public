@@ -221,7 +221,9 @@ function reallyEnded(ev) {
 // Acquittements à garder (clés « appareil|type ») d'après les alertes connues de la page : tant qu'une alerte de ce
 // type est ouverte, ou que la plus récente n'a été fermée que par l'arrêt du service (elle va se rouvrir). Sinon la
 // panne s'est vraiment terminée — sous les yeux de la page ou pendant qu'elle était fermée — et la suivante sonnera.
-function keptAcks(ackedKeys, events) {
+// strict : aussi oublié quand aucune alerte de ce type n'est connue (sortie de la fenêtre) ; sans rigueur, il faut la
+// preuve d'une fin réelle (juste après un chargement, le service redémarré n'a peut-être pas encore rouvert l'alerte).
+function keptAcks(ackedKeys, events, { strict = true } = {}) {
   const latest = new Map(), open = new Set();
   for (const ev of events) {
     const key = alertKey(ev);
@@ -229,7 +231,8 @@ function keptAcks(ackedKeys, events) {
     if (ev.ts_end == null) open.add(key);
     if (!latest.has(key) || ev.ts_start > latest.get(key).ts_start) latest.set(key, ev);
   }
-  return new Set([...ackedKeys].filter((key) => open.has(key) || (latest.has(key) && !reallyEnded(latest.get(key)))));
+  return new Set([...ackedKeys].filter((key) => open.has(key)
+    || (latest.has(key) ? !reallyEnded(latest.get(key)) : !strict)));
 }
 
 // Son d'une alerte qui vient de s'ouvrir : `ackedKeys` (alertes acquittées, par appareil et type, pas encore vues se

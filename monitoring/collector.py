@@ -83,7 +83,8 @@ class DeviceLoop(threading.Thread):
                 self._pause_applied = True
                 if self.close is not None:
                     self.close()
-                self._set_state(self._now_ms(), self._pause_state, "")
+                if self.state != self._pause_state:  # déjà annoncé par un remplacement à la même itération
+                    self._set_state(self._now_ms(), self._pause_state, "")
             return PAUSED_POLL_S
         # Pas en pause : la prochaine pause devra s'appliquer (même si une reprise est arrivée au mauvais moment).
         self._pause_applied = False

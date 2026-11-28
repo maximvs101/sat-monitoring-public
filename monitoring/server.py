@@ -13,6 +13,8 @@ import mimetypes
 import queue
 import re
 import signal
+import socket
+import unicodedata
 from dataclasses import asdict, replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from logging.handlers import RotatingFileHandler
@@ -45,10 +47,15 @@ def valid_host(value) -> bool:
 
 def _number(value, name, positive=True) -> float:
     # Nombre fini seulement : NaN ou Infinity enregistrés dans config.toml bloqueraient tout l'outil.
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) \
-            or (positive and value <= 0):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError(f"{name} invalide")
-    return float(value)
+    try:
+        number = float(value)  # un entier de 400 chiffres ne tient pas dans un flottant
+    except OverflowError:
+        raise ValueError(f"{name} invalide") from None
+    if not math.isfinite(number) or (positive and number <= 0):
+        raise ValueError(f"{name} invalide")
+    return number
 
 
 def _polarization(value):
@@ -73,6 +80,24 @@ def _no_constant(name):
     raise ValueError(f"valeur {name} refusée : nombre fini attendu")
 
 
+GET_ROUTES = ("/api/status", "/api/series", "/api/networks", "/api/devices", "/api/carriers", "/api/events",
+              "/api/live")
+POST_ROUTES = ("/api/discover", "/api/fsh/pause", "/api/fsh/resume")
+POST_SECTIONS = ("fsh", "irds", "carriers", "detect")  # /api/<section>[/…] : réglages
+
+
+def _allowed_methods(path: str) -> tuple:
+    """Méthodes acceptées sur un chemin ; vide pour une route inconnue de l'API."""
+    if not path.startswith("/api/"):
+        return ("GET",)  # fichiers de la page
+    methods = []
+    if path in GET_ROUTES or (path.startswith("/api/ird/") and path.endswith("/image.jpg")):
+        methods.append("GET")
+    if path in POST_ROUTES or path.split("/")[2:3] in ([s] for s in POST_SECTIONS):
+        methods.append("POST")
+    return tuple(methods)
+
+
 def _name(value, message) -> str:
     """Nom d'IRD ou de porteuse, sans espaces autour ; vide refusé."""
     if not isinstance(value, str) or not value.strip():
@@ -81,7 +106,8 @@ def _name(value, message) -> str:
         value.encode("utf-8")  # caractère isolé invalide (« surrogate ») : impossible à enregistrer
     except UnicodeEncodeError:
         raise ValueError("nom : caractère invalide") from None
-    if any(ord(c) < 32 or ord(c) == 127 for c in value):
+    # Caractères de contrôle (dont U+0085) et séparateurs de ligne ou de paragraphe (U+2028, U+2029).
+    if any(unicodedata.category(c) in ("Cc", "Zl", "Zp") for c in value):
         raise ValueError("nom : retour à la ligne ou caractère de contrôle refusé")
     return value.strip()
 
@@ -165,7 +191,7 @@ def make_server(app: App) -> ThreadingHTTPServer:
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            if body:
+            if body and self.command != "HEAD":
                 self.wfile.write(body)
 
         def _json(self, obj, status=200):
@@ -177,7 +203,7 @@ def make_server(app: App) -> ThreadingHTTPServer:
         def _range(self, params):
             from_ts, to_ts = _int_param(params, "from"), _int_param(params, "to")
             if from_ts > to_ts:
-                raise ValueError("from > to")
+                raise ValueError("période invalide : début après la fin (from > to)")
             return from_ts, to_ts
 
         def _host_allowed(self) -> bool:
@@ -214,10 +240,22 @@ def make_server(app: App) -> ThreadingHTTPServer:
         def do_POST(self):
             self._guarded(self._post)
 
-        def _not_allowed(self):
-            self._guarded(lambda: self._error(405, "méthode non prise en charge"))
+        def _wrong_method(self, path) -> bool:
+            """Route connue, mais pas pour cette méthode : 405 avec les méthodes acceptées (en-tête Allow)."""
+            allowed = _allowed_methods(path)
+            if self.command in allowed:
+                return False
+            if not allowed:
+                self._error(404, "inconnu")
+            else:
+                self._send(405, json.dumps({"erreur": "méthode non prise en charge"}).encode(),
+                           headers=(("Allow", ", ".join(allowed)),))
+            return True
 
-        do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = _not_allowed
+        def _not_allowed(self):
+            self._guarded(lambda: self._wrong_method(urlsplit(self.path).path))
+
+        do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_TRACE = do_CONNECT = _not_allowed
 
         def _get(self):
             url = urlsplit(self.path)
@@ -252,8 +290,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
                 if image is None:
                     return self._error(404, "pas d'image")
                 return self._send(200, image, "image/jpeg", headers=(("Cache-Control", "no-store"),))
-            if url.path.startswith("/api/"):
-                return self._error(404, "inconnu")
+            if self._wrong_method(url.path):  # route des réglages (POST) demandée en GET, ou route inconnue
+                return
             return self._static(url.path)
 
         def _same_origin(self) -> bool:
@@ -277,7 +315,15 @@ def make_server(app: App) -> ThreadingHTTPServer:
             if length > 10_000:
                 raise ValueError("requête trop grande")
             try:
-                body = json.loads(self.rfile.read(length) or b"{}", parse_constant=_no_constant)
+                data = self.rfile.read(length)
+            except (socket.timeout, TimeoutError):  # socket.timeout : Python 3.8 et 3.9
+                data = b""
+            if len(data) < length:
+                # Client trop lent ou parti avant la fin du corps : la connexion ne peut plus servir.
+                self.close_connection = True
+                raise ValueError("requête incomplète")
+            try:
+                body = json.loads(data or b"{}", parse_constant=_no_constant)
             except ValueError as e:
                 if str(e).startswith("valeur "):  # NaN, Infinity : message déjà en français
                     raise
@@ -289,6 +335,8 @@ def make_server(app: App) -> ThreadingHTTPServer:
 
         def _post(self):
             path = urlsplit(self.path).path
+            if self._wrong_method(path):  # route de lecture (GET) demandée en POST, ou route inconnue
+                return
             # Réglages réservés à la machine du service : consultée depuis un autre poste, la page est en lecture seule.
             if not ipaddress.ip_address(self.client_address[0]).is_loopback:
                 return self._error(403, "réglages réservés à la machine du service")

@@ -15,7 +15,8 @@ const JournalPage = (() => {
   let periodCarriers = [];  // porteuses de la période, avec les périodes d'appartenance de chaque IRD
   let refresh = null;
 
-  const period = () => route.period || "24h";
+  // Pas de direct dans le journal : période absente, inconnue ou inversée (lien modifié à la main) → 24 h.
+  const period = () => (isLive(route.period) ? "24h" : route.period);
 
   function go(changes) {
     location.hash = routeHref({ page: "journal", period: route.period, src: route.src, open: route.open, ...changes });

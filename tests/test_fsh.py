@@ -130,6 +130,34 @@ class FshTest(unittest.TestCase):
         reader.read()
         self.assertEqual(srv.received.count("BAND?"), 2)
 
+    def test_reader_rereads_settings_after_failed_read(self):
+        # Lecture interrompue (délai dépassé) : la connexion a pu être rouverte, réglages relus au cycle suivant.
+        class Client:
+            def __init__(self):
+                self.settings_reads, self.fail = 0, False
+
+            def read_settings(self):
+                self.settings_reads += 1
+                return FshSettings(50e6, 300e3, ((1, 11.21e9),))
+
+            def marker_on(self, n):
+                if self.fail:
+                    raise OSError("délai")
+                return True
+
+            def read_level(self, n):
+                return -50.0
+
+        client, now = Client(), [100.0]
+        reader = FshReader(client, settings_every_s=10.0, clock=lambda: now[0])
+        reader.read()
+        client.fail = True
+        with self.assertRaises(OSError):
+            reader.read()
+        client.fail = False
+        reader.read()
+        self.assertEqual(client.settings_reads, 2)
+
     def test_reader_reads_settings_every_10s(self):
         srv, c = self.make(MULTI)
         now = [100.0]

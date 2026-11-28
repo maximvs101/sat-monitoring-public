@@ -308,3 +308,13 @@ test("période personnalisée inversée : le direct, pas un faux direct figé", 
   assert.equal(core.isLive("2000-1000"), true);
   assert.equal(core.isLive("1000-2000"), false);
 });
+
+test("acquittements : sans aucune alerte connue de ce type, gardés tant qu'on n'en a pas la preuve de fin", () => {
+  const acks = new Set(["ird:A|lock_lost"]);
+  // Service resté arrêté plus de 10 min : l'alerte fermée par l'arrêt est sortie de la fenêtre, la réouverture pas
+  // encore arrivée. Sans preuve de fin, l'acquittement reste (sinon l'alerte rouverte sonnerait de nouveau).
+  assert.deepEqual([...core.keptAcks(acks, [], { strict: false })], ["ird:A|lock_lost"]);
+  // Preuve de fin (fin réelle vue) : oublié même sans rigueur.
+  const ended = { id: 1, source: "ird:A", kind: "lock_lost", ts_start: 1000, ts_end: 5000, detail: "x" };
+  assert.deepEqual([...core.keptAcks(acks, [ended], { strict: false })], []);
+});

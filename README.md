@@ -43,7 +43,7 @@ Tout le détail (alertes et leurs seuils, marqueurs, réglages, données, API) :
 
 ## Exécutable Windows
 
-Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`). Un second job, `windows7`, fait de même en Python 3.8 32 bits pour Windows 7 SP1 : archive `MonitoringSat-Windows7`. Sur un tag `v*`, un job `release` publie les deux archives ensemble, une fois les deux fabriquées et essayées (seul job autorisé à écrire dans le dépôt ; actions figées sur un commit).
+Le workflow GitHub Actions `.github/workflows/windows.yml` lance les tests sous Windows, fabrique `MonitoringSat.exe` avec PyInstaller (Python et la page embarqués), vérifie qu'il démarre, puis produit l'archive `MonitoringSat-Windows` (avec `LISEZMOI-Windows.txt`). Un second job, `windows7`, fait de même en Python 3.8 32 bits pour Windows 7 SP1 : archive `MonitoringSat-Windows7`. Sur un tag `v*` poussé, un job `release` publie les deux archives ensemble, avec `SHA256SUMS.txt` (empreintes des deux archives), une fois les deux fabriquées et essayées (seul job autorisé à écrire dans le dépôt ; actions figées sur un commit).
 
 - **À la main** : onglet **Actions** → « Exécutable Windows » → **Run workflow** ; l'archive est dans la rubrique **Artifacts** de l'exécution (90 jours).
 - **Version publiée** : pousser un tag `v…` (par exemple `v1.0.0`) ; l'archive est jointe à la **Release**.
@@ -57,7 +57,7 @@ python3 -m unittest discover tests
 node --test "web/tests/*.test.js"
 ```
 
-366 tests Python et 44 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
+380 tests Python et 48 tests de la page, sans appareil ni réseau (faux FSH4 et faux IRD locaux) ; ils passent sur Mac et sous Windows.
 
 ## Documentation
 

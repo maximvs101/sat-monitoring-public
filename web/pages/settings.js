@@ -35,15 +35,19 @@ const SettingsPage = (() => {
   }
 
   // Action sur le service : erreur affichée dans `box`, puis page et données partagées rafraîchies.
+  // Renvoie true si l'action a réussi.
   async function act(fn, box) {
     showError(box, "");
+    let ok = true;
     try {
       await fn();
     } catch (e) {
       showError(box, e.message);
+      ok = false;
     }
     await refresh();
     Store.reload();
+    return ok;
   }
 
   function carrierName(key) {
@@ -145,7 +149,8 @@ const SettingsPage = (() => {
         }),
         ...foundList("IRD Ateme", r.ird,
           (i) => [`${i.name || "Sans nom"} (${i.model}) — ${i.host}`, `${i.input} · n° ${i.serial}`, known.has(i.serial) ? "" : "Ajouter"],
-          (i) => act(() => Store.post("/api/irds", { host: i.host }), err).then(() => scan(btn, info, found, err, false))),
+          // Relancée seulement après un ajout réussi : sinon elle effacerait le message d'erreur de l'ajout.
+          (i) => act(() => Store.post("/api/irds", { host: i.host }), err).then((ok) => ok && scan(btn, info, found, err, false))),
       );
     } catch (e) {
       showError(err, `Recherche impossible : ${e.message}`);

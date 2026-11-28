@@ -228,6 +228,17 @@ class LoopTest(unittest.TestCase):
         loop.step()
         self.assertEqual(closed, ["nouveau"])
 
+    def test_device_removed_announced_once(self):
+        # FSH4 retiré : remplacement puis pause « absent » à la même itération, un seul changement d'état diffusé.
+        rec = Recorder()
+        loop = make(lambda: "ancien", Clock(*[0.0] * 20), rec)
+        loop.step()
+        loop.replace_reader(lambda: "nouveau")
+        loop.pause("absent")
+        loop.step()
+        loop.step()
+        self.assertEqual(rec.states, ["up", "absent"])
+
     def test_replace_reader_while_paused_stays_paused_then_resumes(self):
         # Pause FSH, puis nouvelle adresse dans Appareils… : la boucle reste « en pause », et reprend ensuite.
         rec = Recorder()

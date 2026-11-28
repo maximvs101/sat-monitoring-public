@@ -288,6 +288,69 @@ class ServerTest(unittest.TestCase):
             self.assertEqual(status, 405, method)
             self.assertIn("erreur", json.loads(body))
 
+    def test_head_405_without_body(self):
+        # Sans corps : la connexion reste utilisable pour la requête suivante.
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("HEAD", "/api/status")
+        r = c.getresponse()
+        r.read()
+        self.assertEqual(r.status, 405)
+        self.assertEqual(r.getheader("Allow"), "GET")
+        c.request("GET", "/api/status")
+        r = c.getresponse()
+        self.assertEqual(r.status, 200)
+        json.loads(r.read())
+        c.close()
+
+    def test_trace_and_connect_405(self):
+        for method in ("TRACE", "CONNECT"):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            c.putrequest(method, "/api/status", skip_host=True, skip_accept_encoding=True)
+            c.putheader("Host", f"127.0.0.1:{self.port}")
+            c.endheaders()
+            r = c.getresponse()
+            r.read()
+            c.close()
+            self.assertEqual(r.status, 405, method)
+
+    def test_wrong_method_on_known_route_405(self):
+        status, body = self.post("/api/status")
+        self.assertEqual(status, 405)
+        self.assertIn("erreur", json.loads(body))
+        r = self.raw_response("GET", "/api/discover")
+        self.assertEqual(r.status, 405)
+        self.assertEqual(r.getheader("Allow"), "POST")
+        self.assertEqual(self.raw_response("GET", "/api/irds/S1").status, 405)
+        self.assertEqual(self.post("/api/inconnu")[0], 404)
+
+    def test_truncated_body_400(self):
+        from monitoring import server as server_module
+        with mock.patch.object(server_module, "REQUEST_TIMEOUT_S", 0.3):
+            httpd = make_server(self.app)
+            threading.Thread(target=httpd.serve_forever, daemon=True).start()
+            self.addCleanup(httpd.server_close)
+            self.addCleanup(httpd.shutdown)
+            c = http.client.HTTPConnection("127.0.0.1", httpd.server_address[1], timeout=5)
+            c.putrequest("POST", "/api/detect")
+            c.putheader("Content-Type", "application/json")
+            c.putheader("Content-Length", "100")
+            c.endheaders()
+            c.send(b'{"margin')
+            r = c.getresponse()
+            body = r.read()
+            c.close()
+        self.assertEqual(r.status, 400, body)
+        self.assertIn("incomplète", json.loads(body)["erreur"])
+
+    def test_inverted_range_message_in_french(self):
+        status, body = self.get("/api/events?from=10&to=5")
+        self.assertEqual(status, 400)
+        self.assertIn("début", json.loads(body)["erreur"])
+
+    def test_names_with_line_separators_refused(self):
+        for name in ("a\u2028b", "a\u2029b", "a\x85b"):
+            self.assertEqual(self.post("/api/irds/S1", {"name": name})[0], 400, repr(name))
+
     def test_names_with_control_characters_refused(self):
         self.assertEqual(self.post("/api/irds/S1", {"name": "a\nb"})[0], 400)
         self.assertEqual(self.post("/api/carriers", {"name": "x\ty", "freq_mhz": 11685.0})[0], 400)
@@ -385,6 +448,12 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(self.post("/api/irds/S2", {"name": "IRD deux"})[0], 204)  # un autre IRD
         self.assertEqual(self.app.names["S1"], "IRD 1")
 
+    def test_huge_integer_refused_not_500(self):
+        big = "1" + "0" * 400
+        for raw in ('{"name":"x","freq_mhz":%s}' % big, '{"margin_drop_db":%s,"margin_min_db":0}' % big):
+            path = "/api/carriers" if "freq" in raw else "/api/detect"
+            self.assertEqual(self.request("POST", path, raw=raw)[0], 400, path)
+
     # --- Sécurité et divers ---
 
     def test_foreign_origin_forbidden(self):
@@ -473,8 +542,10 @@ class ServerTest(unittest.TestCase):
 
     def test_unknown_route_404(self):
         self.assertEqual(self.get("/api/nope")[0], 404)
-        self.assertEqual(self.get("/api/fsh/pause")[0], 404)
-        self.assertEqual(self.post("/api/devices", {})[0], 404)  # ancienne route retirée
+        self.assertEqual(self.post("/api/nope", {})[0], 404)
+        # Route connue, mauvaise méthode : 405 (l'ancienne route POST /api/devices n'existe plus qu'en lecture).
+        self.assertEqual(self.get("/api/fsh/pause")[0], 405)
+        self.assertEqual(self.post("/api/devices", {})[0], 405)
 
     def test_ird_image_route(self):
         self.irds.thumbs["S1"] = b"\xff\xd8image"

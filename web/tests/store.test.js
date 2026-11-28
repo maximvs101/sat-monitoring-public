@@ -200,3 +200,49 @@ test("heure du service : un poste en avance ou en retard ne fausse ni la fenêtr
   assert.ok(Math.abs(Store.now() - (Date.now() + ahead)) < 2000);
   assert.ok(Math.abs(Store.liveRange()[1] - (Date.now() + ahead)) < 2000);
 });
+
+test("premier chargement en échec, direct déjà ouvert : nouvel essai toutes les quelques secondes", async () => {
+  const calls = [];
+  let up = false;
+  const service = fshService(calls);
+  const { Store, sources, intervals } = loadStore(async (url) => (up ? service(url) : (calls.push(url), { ok: false, status: 503 })));
+  await Store.start().catch(() => {});
+  sources[0].onopen();  // le direct s'ouvre alors que le statut répond encore en erreur
+  await new Promise((r) => setImmediate(r));
+  assert.strictEqual(Store.state.loaded, false);
+  up = true;
+  for (let i = 0; i < 5; i++) intervals[0].fn();
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+  assert.strictEqual(Store.state.loaded, true);
+});
+
+test("heure du service : prise à la réponse du statut, pas après les séries (lentes)", async () => {
+  const calls = [];
+  const service = fshService(calls);
+  const { Store } = loadStore(async (url) => {
+    if (url.startsWith("/api/series")) await new Promise((r) => setTimeout(r, 400));
+    return service(url);
+  });
+  await Store.start();
+  // Statut daté à l'instant de sa réponse : l'heure du service suit celle du poste (même horloge ici).
+  assert.ok(Math.abs(Store.now() - Date.now()) < 150, `${Store.now() - Date.now()} ms d'écart`);
+});
+
+test("marqueur éteint : retiré de la liste quand ses mesures sortent de la fenêtre", async () => {
+  const calls = [];
+  const service = fshService(calls);
+  const ahead = 11 * 60_000;  // les mesures chargées sortent de la fenêtre du direct (10 min) au premier tick
+  const { Store, sources, intervals } = loadStore(async (url) => {
+    const res = await service(url);
+    if (!url.startsWith("/api/status")) return res;
+    const st = await res.json();
+    st.now += ahead;
+    return { ok: true, status: 200, json: async () => st };
+  });
+  await Store.start();
+  sources[0].onmessage({ data: JSON.stringify({ type: "markers", ts: Store.now(), markers: { 1: { freq_hz: 11e9, level_dbm: -50 } } }) });
+  intervals[0].fn();
+  const f = Store.state.fsh;
+  assert.deepStrictEqual([...f.nums], [1]);
+  assert.strictEqual(f.levels[2], undefined);
+});

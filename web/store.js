@@ -5,6 +5,7 @@
 
 const Store = (() => {
   const RECONNECT_MS = 5000;
+  const RETRY_LOAD_TICKS = 5;  // secondes entre deux essais du premier chargement
   const state = {
     cfg: { live_window_min: 10, event_padding_s: 30, max_points: 5000 },
     connected: false,       // flux en direct ouvert
@@ -73,8 +74,9 @@ const Store = (() => {
     return [t - state.cfg.live_window_min * 60_000, t];
   }
 
-  function applyStatus(st) {
-    if (st.now != null) clockOffset = st.now - Date.now();
+  // receivedAt : heure du poste à la réponse du statut (le chargement attend ensuite les séries, parfois longues).
+  function applyStatus(st, receivedAt = Date.now()) {
+    if (st.now != null) clockOffset = st.now - receivedAt;
     state.cfg = st.config;
     state.carriers = st.carriers;
     state.noise = st.marker_map.noise;
@@ -143,9 +145,10 @@ const Store = (() => {
   async function loadLive() {
     const seq = ++loadSeq;
     pending = pending || [];
-    let status, series, events;
+    let status, series, events, receivedAt;
     try {
       status = await getJSON("/api/status");
+      receivedAt = Date.now();
       const [from, to] = [status.now - status.config.live_window_min * 60_000, status.now];
       [series, events] = await Promise.all([
         // Assez de points pour toute la fenêtre (FSH4 jusqu'à 4 Hz) : sinon le service regrouperait les points et
@@ -158,7 +161,7 @@ const Store = (() => {
       const buffered = pending || [];
       pending = null;
       if (series) {
-        applyStatus(status);
+        applyStatus(status, receivedAt);
         const converted = convertSeries(series);
         state.fsh = converted.fsh;
         state.irds = converted.irds;
@@ -201,6 +204,13 @@ const Store = (() => {
     };
     const f = state.fsh;
     cut(f.ts, f.nums.flatMap((k) => [f.levels[k], f.levelsMin[k], f.levelsMax[k]]));
+    // Marqueur éteint dont plus aucune mesure n'est dans la fenêtre : il quitte la liste (graphe et tableau).
+    if (f.on !== null) {
+      for (const k of f.nums.filter((n) => !f.on.includes(n) && f.levels[n].every((v) => v == null))) {
+        f.nums.splice(f.nums.indexOf(k), 1);
+        for (const per of [f.levels, f.levelsMin, f.levelsMax, f.freqs]) delete per[k];
+      }
+    }
     for (const d of Object.values(state.irds)) cut(d.ts, [d.margin_db, d.locked, d.state, d.power_dbm]);
     for (const [id, ev] of state.events) {
       if (ev.ts_end != null && ev.ts_end < from) state.events.delete(id);
@@ -288,7 +298,10 @@ const Store = (() => {
   // La minuterie démarre avant le premier chargement : s'il échoue, la fenêtre du direct reste bornée.
   async function start() {
     startLive();
+    let ticks = 0;
     setInterval(() => {
+      // Premier chargement toujours en échec (direct ouvert pendant le démarrage du service) : nouvel essai.
+      if (!state.loaded && ++ticks % RETRY_LOAD_TICKS === 0) reload();
       trimLive();
       notify("tick");  // l'axe du temps avance même sans nouvelle mesure
     }, 1000);

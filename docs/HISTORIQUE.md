@@ -1,25 +1,38 @@
 # Historique
 
-## État actuel (24 octobre 2026)
+## État actuel (28 novembre 2026)
 
-- Branche `main` ; 366 tests Python et 44 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
-- Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; il tourne avec le code de la v1.2.0 (la page est servie depuis le dossier du dépôt).
+- Branche `main` ; 380 tests Python et 48 tests de la page (`node --test`) verts. Dépôt public https://github.com/maximvs101/sat-monitoring-public : copie nettoyée du dépôt de travail (adresses, numéros de série et noms de programme du site remplacés par des exemples). Max pousse via GitHub Desktop. `config.toml` (adresses et numéros de série du site) n'est plus suivi par git depuis le 22/10 : chaque machine a le sien, créé à partir de `config.example.toml`.
+- Service lancé depuis ce Mac (page http://localhost:8080), base `data/monitoring.db`, purge à 30 jours ; la page est servie depuis le dossier du dépôt, le service garde le code de son dernier démarrage.
 - Site actuel : réseau 192.168.10.x.
   - IRD 1 (DR5000 n° 1000-00001, 192.168.10.141) et IRD 3 (DR5000 n° 1000-00003, 192.168.10.143) : re-réglés plusieurs fois sur le site (12 525,5 V, puis **12 552,5 V** au 24/10 en fin d'après-midi, fréquence configurée) et toujours **sans lock**, puis **éteints** vers 16:43 ; les porteuses C1 (12 583,0 V) et C2 (12 592,0 V) n'existent plus en direct (visibles sur les périodes passées).
   - FSH4 : l'outil pointe depuis le 22/10 au soir sur un second FSH4, 192.168.10.99 (n° 100001, firmware V2.50), sans l'option FSH-K40 : aucune mesure possible (voir le guide). Au 24/10 il ne répond plus du tout sur le réseau (« Host is down »). L'ancien FSH4 (192.168.10.224, V1.20) n'avait pas besoin de l'option. La puissance d'entrée des IRD tient lieu de niveau RF.
 - Page refondue (fusionnée dans main le 22/10) : menu à gauche, vue d'ensemble, une page par porteuse avec période, journal, analyseur FSH4, réglages en pages. Seuils de marge sur ce Mac : chute 2 dB, marge minimale 3 dB.
-- Windows : versions publiées sur le dépôt public, dernière **v1.3.5** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.5, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`) ; **essayée avec succès sur un PC Windows** le 24/10 (confirmé par Max).
+- Windows : versions publiées sur le dépôt public, dernière **v1.3.5** (https://github.com/maximvs101/sat-monitoring-public/releases/tag/v1.3.5, `MonitoringSat-Windows.zip`, `MonitoringSat-Windows7.zip`, `SHA256SUMS.txt`). Dernier essai sur un PC Windows : la v1.2.3, le 24/10, avec succès (confirmé par Max) ; les versions suivantes n'y ont pas encore été essayées.
 
 ## À faire
 
 - Obtenir le firmware FSH4 (support R&S ou distributeur, n° de série 100000), puis lecture de trace et spectrogramme.
-- Consultation depuis un autre PC (prévue) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
+- Essayer une version 1.3.x sur un PC Windows, et la version Windows 7 sur le vrai PC Windows 7.
+- Consultation depuis un autre PC (prévue, marche à suivre dans le guide) : le service n'écoute que sur 127.0.0.1 (`host` de `[server]` dans `config.toml`). Il faudra contrôler l'ouverture au réseau, la page en lecture seule depuis le réseau, et les actions (Réglages, Pause FSH4) réservées à la machine du service.
 - À vérifier lors d'une vraie coupure : contenu de la réponse `refresh` quand le programme disparaît ou que le décodeur se resynchronise (une « Image perdue » brève après le retour du lock est possible si la resynchro dépasse 3 s).
 - Cas laissés en l'état : programme radio sans vidéo → « Image perdue » permanente ; voies audio configurées sur un programme sans son → « Son absent » permanent.
 - Limites assumées (pas des défauts à corriger) :
   - FSH4 V1.20 : il reste un aller-retour réseau entre « marqueur allumé ? » et la lecture de sa fréquence ou de son niveau ; un marqueur éteint par l'opérateur exactement à ce moment serait rallumé (le protocole n'a pas de lecture atomique ; touches verrouillées en mode Remote) ;
   - message « option FSH-K40 absente ? » : déduit de l'erreur -113 de la file d'erreurs, que l'outil lit sans la vider ni rien modifier ; une erreur laissée par un autre client peut tromper (d'où le « ? ») ;
-  - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable ».
+  - plus de 10 réponses « occupé » (HTTP 503) de suite comptent comme des échecs : voulu, un IRD bloqué en reverrouillage doit finir par passer « injoignable » ;
+  - dépendances de PyInstaller non figées pour les deux fabrications Windows (seul PyInstaller l'est pour Windows 7) : à figer seulement avec une fabrication de contrôle.
+
+## 28 novembre 2026
+
+- **Nouvelle vérification** (sous-agents, mêmes axes que le 27/11) puis corrections (branche `corrections-verif2`, à la demande de Max) :
+  - **polarisation du FSH4** changée seule : les références de marge et de niveau repartent de zéro (« entrée du FSH4 changée »), sans fausse alerte ; une lecture de l'ancien FSH4 qui se termine après un changement n'est plus enregistrée ;
+  - **XML** d'un appareil refusé s'il n'est pas en UTF-8 (une déclaration d'entités en UTF-16 passait le contrôle) ; entier géant dans une saisie refusé (400 au lieu de 500) ;
+  - **alarmes** : un acquittement n'est plus perdu quand le service reste arrêté plus de 10 min (l'alerte fermée par l'arrêt sortait de la fenêtre) ; après chaque chargement, la page attend 2 min que le service rouvre ses alertes avant d'oublier un acquittement sans alerte connue ;
+  - **serveur** : 405 avec l'en-tête `Allow` (HEAD sans corps, TRACE et CONNECT compris, mauvaise méthode sur une route connue), corps de requête incomplet → 400 « requête incomplète », période inversée en français, noms sans séparateur de ligne (U+2028, U+2029, U+0085) ;
+  - **service** : réglages du FSH4 relus après une lecture interrompue, IRD retirés absents des états du statut, état « absent » diffusé une seule fois au retrait du FSH4 ;
+  - **page** : premier chargement réessayé toutes les 5 s tant qu'il échoue, heure du service prise à la réponse du statut, marqueur éteint retiré de la liste quand ses mesures sortent de la fenêtre, journal sur 24 h pour une période inconnue ou inversée, période personnalisée proposée à l'heure du service, message d'erreur d'un « Ajouter » de la recherche conservé ;
+  - **docs et CI** : état actuel à jour, ouverture de la page à un autre PC (guide, `config.example.toml`), réponses de l'API, `ip -4 -o addr`, `SHA256SUMS.txt` dans le README ; job `release` seulement sur un tag poussé.
 
 ## 27 novembre 2026
 

@@ -10,6 +10,10 @@ const Alerts = (() => {
   const STATE_KEY = "monitoring-sat.alarmes";  // acquittements et silences, gardés d'un chargement à l'autre
   const DEFAULTS = { sound: true, critical: true, warning: true, repeat_s: 30, repeat_max_min: 15, volume: 0.6, browser: false };
   const SILENCE_MS = 3_600_000;
+  // Après un chargement (page ouverte, service redémarré, reconnexion) : le temps que le service rouvre ses alertes
+  // avant d'oublier un acquittement dont l'alerte n'est plus connue de la page.
+  const ACK_GRACE_MS = 120_000;
+  let strictAfter = null;     // heure (horloge du poste) à partir de laquelle l'oubli redevient strict
   let prefs = load();
   // ackedKeys : alertes acquittées (« appareil|type ») pas encore vues se terminer vraiment ; muted : { source: fin }
   let { ackedKeys, muted } = loadState();
@@ -155,6 +159,7 @@ const Alerts = (() => {
       if (Store.state.loaded) begin();  // premier chargement réussi (il avait échoué au démarrage de la page)
       return;
     }
+    if (kind === "reload") strictAfter = Date.now() + ACK_GRACE_MS;  // reconnexion : même délai qu'au chargement
     const now = Date.now();
     let alarm = false, beep = false;
     // Panne vraiment terminée (pas seulement fermée par l'arrêt du service) : son acquittement est oublié, une
@@ -248,7 +253,9 @@ const Alerts = (() => {
   }
 
   function forgetEndedAcks() {
-    const kept = keptAcks(ackedKeys, Store.state.events.values());
+    const strict = strictAfter === null || Date.now() >= strictAfter;
+    if (strict) strictAfter = null;
+    const kept = keptAcks(ackedKeys, Store.state.events.values(), { strict });
     if (kept.size === ackedKeys.size) return;
     ackedKeys = kept;
     saveState();
@@ -257,6 +264,7 @@ const Alerts = (() => {
   // Point de départ des alarmes, au premier chargement réussi : les alertes déjà en cours ne sonnent pas, et comptent
   // comme acquittées (un redémarrage du service qui les rouvre ne doit pas déclencher l'alarme).
   function begin() {
+    strictAfter = Date.now() + ACK_GRACE_MS;
     known = new Map([...Store.state.events.values()].map((ev) => [ev.id, ev.severity]));
     for (const ev of Store.state.events.values()) if (ev.ts_end == null && ev.severity === "critical") ackedKeys.add(alertKey(ev));
     // Acquittements d'une session précédente dont la panne s'est terminée page fermée : oubliés.

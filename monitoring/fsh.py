@@ -149,14 +149,19 @@ class FshReader:
     def read(self) -> FshReading:
         """Réglages et fréquences toutes les `settings_every_s` s ; niveaux des marqueurs allumés à chaque appel."""
         now = self.clock()
-        if self._settings_at is None or now - self._settings_at >= self.settings_every_s:
-            self._settings = self.client.read_settings()
-            self._settings_at = now
-        markers = {}
-        for n, freq in self._settings.markers:
-            # Sur le FSH4 V1.20, lire le niveau d'un marqueur éteint le rallume : on vérifie d'abord.
-            if not self.client.marker_on(n):
-                self._settings_at = None  # relevé complet au prochain cycle
-                continue
-            markers[n] = MarkerSample(freq, self.client.read_level(n))
+        try:
+            if self._settings_at is None or now - self._settings_at >= self.settings_every_s:
+                self._settings = self.client.read_settings()
+                self._settings_at = now
+            markers = {}
+            for n, freq in self._settings.markers:
+                # Sur le FSH4 V1.20, lire le niveau d'un marqueur éteint le rallume : on vérifie d'abord.
+                if not self.client.marker_on(n):
+                    self._settings_at = None  # relevé complet au prochain cycle
+                    continue
+                markers[n] = MarkerSample(freq, self.client.read_level(n))
+        except Exception:
+            # Lecture interrompue : la connexion sera rouverte, l'opérateur a pu toucher au FSH4 entre-temps.
+            self._settings_at = None
+            raise
         return FshReading(markers, self._settings)

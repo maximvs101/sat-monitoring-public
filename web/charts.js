@@ -298,9 +298,10 @@ const PeriodSelector = (() => {
     }
     const toggle = el("button", { type: "button", textContent: "Période…", className: custom ? "on" : "" });
     seg.append(toggle);
-    const [from, to] = periodRange(current, Date.now(), 60);
-    const start = el("input", { type: "datetime-local", className: "input", value: localInput(custom ? from : Date.now() - 86_400_000) });
-    const end = el("input", { type: "datetime-local", className: "input", value: localInput(custom ? to : Date.now()) });
+    const now = Store.now();  // heure du service : les mesures sont datées par lui
+    const [from, to] = periodRange(current, now, 60);
+    const start = el("input", { type: "datetime-local", className: "input", value: localInput(custom ? from : now - 86_400_000) });
+    const end = el("input", { type: "datetime-local", className: "input", value: localInput(custom ? to : now) });
     const apply = button("Afficher", () => {
       const a = new Date(start.value).getTime(), b = new Date(end.value).getTime();
       if (Number.isNaN(a) || Number.isNaN(b)) alert("Renseigner la date et l'heure de début et de fin.");

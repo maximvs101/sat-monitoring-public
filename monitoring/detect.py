@@ -19,6 +19,7 @@ WARNING = "warning"
 INFO = "info"
 SETTINGS_REASON = "réglage FSH4 modifié"
 DEVICES_REASON = "appareils changés"
+FSH_INPUT_REASON = "entrée du FSH4 changée"
 REMOVED_REASON = "IRD retiré"
 VANISHED_REASON = "porteuse disparue"
 ALONE_DELAY_MS = 3000
@@ -536,6 +537,11 @@ class Detector:
         for rule in self.carrier_rules.values():
             changed += rule.reset(self, ts, reason)
         return changed + self.noise.reset(self, ts, reason)
+
+    def on_fsh_input_changed(self, ts: int) -> list[dict]:
+        """Polarisation de l'entrée du FSH4 changée : mêmes marqueurs, mais d'autres porteuses mesurées ; les références
+        RF repartent de zéro (pas d'événement « appareils changés » : c'est le même appareil)."""
+        return self._reset_rf(ts, FSH_INPUT_REASON)
 
     def on_devices_changed(self, ts: int, detail: str) -> list[dict]:
         """Nouvelle adresse du FSH4 : ses alertes sont fermées, ses références repartent de zéro."""

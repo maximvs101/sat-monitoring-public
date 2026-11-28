@@ -119,6 +119,19 @@ class DetectTest(unittest.TestCase):
         self.feed(MarkerSample(11.2208e9, -51.0), 60, kind="fsh")
         self.assertEqual(self.kinds(open_only=True), [])
 
+    def test_fsh_input_change_resets_rf_without_event(self):
+        # Polarisation de l'entrée changée : mêmes marqueurs, autres porteuses ; les références RF repartent de zéro
+        # (sinon fausse « remontée du bruit », ou chute de niveau qui ne se ferme plus), sans « appareils changés ».
+        self.feed(MarkerSample(11.2e9, -40.2), 60, kind="fsh")
+        self.feed(MarkerSample(11.2e9, -45.0), 3, kind="fsh")
+        self.assertEqual(self.kinds(open_only=True), ["marker_drop"])
+        self.t += 1000
+        changed = self.det.on_fsh_input_changed(self.t)
+        self.assertEqual([e["kind"] for e in changed], ["marker_drop"])
+        self.assertIn("entrée du FSH4 changée", changed[0]["detail"])
+        self.assertEqual(self.kinds(open_only=True), [])
+        self.assertNotIn("devices_changed", self.kinds())
+
     def test_devices_changed_closes_fsh_alerts(self):
         self.feed(MarkerSample(11.22e9, -50.0), 60, kind="fsh")
         self.feed(MarkerSample(11.22e9, -56.0), 3, kind="fsh")

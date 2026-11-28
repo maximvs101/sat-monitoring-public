@@ -233,6 +233,14 @@ class AppTest(unittest.TestCase):
         self.assertNotIn("S1", app.ird_loops)
         self.assertEqual(load_config(self.cfg_path).irds, ())
 
+    def test_removed_ird_absent_from_status_devices(self):
+        app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))
+        self.irds.samples["S1"] = sample()
+        self.step_irds(app)
+        self.assertTrue(any("S1" in d for d in app.status()["devices"]))
+        app.remove_ird("S1")
+        self.assertFalse(any("S1" in d for d in app.status()["devices"]))
+
     def test_unidentified_ird_from_legacy_config_is_identified_at_start(self):
         app = self.make((IrdEntry("", "IRD", "10.0.0.1"),))
         self.assertEqual(app.ird_loops, {})
@@ -251,6 +259,20 @@ class AppTest(unittest.TestCase):
         app.set_fsh("10.0.0.9", 5555, "horizontal")
         self.assertEqual([e for e in app.store.events(0, 10**13) if e["kind"] == "devices_changed"], [])
         self.assertEqual(load_config(self.cfg_path).fsh.polarization, "horizontal")
+
+    def test_fsh_polarization_change_resets_rf_references(self):
+        app = self.make()
+        with mock.patch.object(app.detector, "on_fsh_input_changed", wraps=app.detector.on_fsh_input_changed) as spy:
+            app.set_fsh("10.0.0.9", 5555, "horizontal")
+            self.assertEqual(spy.call_count, 1)
+            app.set_fsh("10.0.0.9", 5555, "horizontal")  # rien de changé : pas de remise à zéro
+            self.assertEqual(spy.call_count, 1)
+
+    def test_old_fsh_reading_not_stored_after_change(self):
+        app = self.make()
+        app.set_fsh("10.0.0.8", 5555, None)  # changement demandé, pas encore appliqué par la boucle
+        app._on_marker(5000, self.reading)
+        self.assertEqual(app.store.marker_series(0, 10_000, 100), {})
 
     def test_no_fsh_forgets_markers(self):
         app = self.make((IrdEntry("S1", "IRD 1", "10.0.0.1"),))

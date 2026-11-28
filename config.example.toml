@@ -31,7 +31,7 @@ down_after_failures = 3    # échecs consécutifs avant « appareil injoignable 
 retry_s = 5.0              # intervalle des nouveaux essais
 
 [server]
-host = "127.0.0.1"
+host = "127.0.0.1"          # 127.0.0.1 : page sur cette machine seulement ; "0.0.0.0" : page ouverte au réseau (lecture seule depuis les autres postes, voir le guide)
 port = 8080
 live_window_min = 10       # fenêtre du mode Direct
 event_padding_s = 30       # marge autour d'un événement cliqué

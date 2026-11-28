@@ -186,6 +186,15 @@ class ClientTest(unittest.TestCase):
         with self.assertRaises(IrdError):
             IrdClient(srv.host, IrdConfig()).fetch()
 
+    def test_xml_entities_refused_in_utf16(self):
+        # La recherche réseau analyse la réponse de n'importe quelle machine : le filtre ne se contourne pas en UTF-16.
+        import xml.etree.ElementTree as ET
+        from monitoring.ird import safe_xml
+        bomb = '<?xml version="1.0" encoding="UTF-16"?><!DOCTYPE a [<!ENTITY x "xxxxxxxxxx">]><a>&x;&x;</a>'
+        with self.assertRaises(ET.ParseError):
+            safe_xml(bomb.encode("utf-16"))
+        self.assertEqual(safe_xml("<a>é</a>".encode("utf-8")).text, "é")
+
     def test_thumbnail_rejects_empty(self):
         srv = FakeIrd(thumb=b"")
         self.addCleanup(srv.stop)

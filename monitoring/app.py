@@ -383,19 +383,28 @@ class App:
                 save_fsh(self.config_path, host, port, polarization)
             was_absent = self.fsh_absent
             same_device = (host, port) == (self.cfg.fsh.host, self.cfg.fsh.port)
+            same_input = polarization == self.cfg.fsh.polarization
             self.cfg = replace(self.cfg, fsh=replace(self.cfg.fsh, host=host, port=port, polarization=polarization))
             if same_device:
-                # Seule la polarisation de l'entrée change : même appareil, ses marqueurs sont rattachés de nouveau.
-                self.marker_map = attach_markers(self.carriers(), self.marker_freqs, polarization,
-                                                 self.cfg.detect.noise_markers)
+                # Seule la polarisation de l'entrée change : même appareil, ses marqueurs sont rattachés de nouveau et
+                # les références RF repartent de zéro (un marqueur de porteuse peut devenir un marqueur de bruit).
+                events = []
+                carriers = self.carriers()  # avant le verrou de détection : ordre des verrous du service
+                with self._detect_lock:
+                    self.marker_map = attach_markers(carriers, self.marker_freqs, polarization,
+                                                     self.cfg.detect.noise_markers)
+                    if not same_input:
+                        events = self.detector.on_fsh_input_changed(_now_ms())
                 log.info("FSH4 : entrée %s", polarization or "polarisation inconnue")
+                self._publish_events(events)
                 self._publish_carriers_if_changed(self.carriers(), force=True)
                 return
-            if not host:
-                # Plus de FSH4 : ses marqueurs ne sont plus rattachés aux porteuses.
-                self.marker_freqs, self.marker_map = {}, attach_markers([], {}, None)
             fsh_read, fsh_close = self.fsh_factory(self.cfg)
             with self._detect_lock:
+                if not host:
+                    # Plus de FSH4 : ses marqueurs ne sont plus rattachés aux porteuses (sous le verrou : une dernière
+                    # lecture en cours ne peut pas les rattacher de nouveau).
+                    self.marker_freqs, self.marker_map = {}, attach_markers([], {}, None)
                 # Le changement est d'abord demandé : une lecture de l'ancien appareil qui se termine ensuite est
                 # reconnue (replacement_pending) et ignorée par la détection.
                 self.fsh_loop.replace_reader(fsh_read, fsh_close)
@@ -489,14 +498,14 @@ class App:
         self._publish_carriers_if_changed(carriers)
 
     def _on_marker(self, ts, reading):
-        self.store.add_markers(ts, reading.markers)
         freqs = {n: m.freq_hz for n, m in reading.markers.items()}
         carriers = self.carriers()
         mm = attach_markers(carriers, freqs, self.cfg.fsh.polarization, self.cfg.detect.noise_markers)
         events = []
         with self._detect_lock:
             if self.fsh_loop.replacement_pending():
-                return  # lecture de l'ancien FSH4, arrivée après le changement d'appareil
+                return  # lecture de l'ancien FSH4, arrivée après le changement d'appareil : ni enregistrée ni utilisée
+            self.store.add_markers(ts, reading.markers)
             self.marker_freqs, self.marker_map = freqs, mm
             if reading.settings is not None:
                 key = reading.settings
@@ -570,7 +579,9 @@ class App:
             "pending": [asdict(e) for e in self.pending],
             "carriers": carriers,
             "marker_map": {"if_warning": mm.if_warning, "noise": list(mm.noise), "ambiguous": list(mm.ambiguous)},
-            "devices": latest["devices"],
+            # IRD retirés : leur dernier état reste en base, mais ne concerne plus le site.
+            "devices": {device: v for device, v in latest["devices"].items()
+                        if not device.startswith("ird:") or device[4:] in self.ird_loops},
             "config": {"live_window_min": srv.live_window_min, "event_padding_s": srv.event_padding_s,
                        "max_points": srv.max_points, "margin_drop_db": det.margin_drop_db,
                        "margin_min_db": det.margin_min_db, "median_window_s": det.median_window_s,
